@@ -158,7 +158,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
                 <span className="text-[10px] uppercase font-black text-teal-700 tracking-wider">
                   Текущий активный профиль
                 </span>
-                <p className="text-sm font-black text-slate-800">{activeAccountEmail || 'default@routine.app'}</p>
+                <p className="text-sm font-black text-slate-800">
+                  {activeAccountEmail === 'default@routine.app' ? 'Основной профиль (Локально)' : activeAccountEmail}
+                </p>
+                <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                  Данные надёжно сохранены в памяти устройства
+                </p>
               </div>
               <span className="px-2.5 py-0.5 text-[10px] rounded-full bg-teal-500/20 text-teal-900 font-black">
                 Активен
@@ -237,7 +242,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
             </div>
 
             <p className="text-xs text-slate-600 font-medium mb-3">
-              Для синхронизации между устройствами используется бесплатная база данных Supabase.
+              <span className="font-bold text-amber-900/80">Опционально:</span> если пользуетесь на одном устройстве, настраивать не нужно (всё хранится локально). Облако требуется только для автоматической синхронизации между компьютером и телефоном.
             </p>
 
             {showSupabaseHelp && (

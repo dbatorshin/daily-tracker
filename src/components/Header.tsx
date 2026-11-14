@@ -1,20 +1,18 @@
 import React from 'react';
-import { CheckCircle2, CloudOff, RefreshCw, User, Download, Plus } from 'lucide-react';
+import { CheckCircle2, CloudOff, RefreshCw, User, Plus } from 'lucide-react';
 import { useRoutines } from '../context/RoutineContext';
 import { haptic } from '../utils/haptics';
 
 interface HeaderProps {
   onOpenAccount: () => void;
   onOpenNewTask: () => void;
-  installPrompt: any;
-  onInstall: () => void;
+  installPrompt?: any;
+  onInstall?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   onOpenAccount,
   onOpenNewTask,
-  installPrompt,
-  onInstall,
 }) => {
   const {
     activeAccountEmail,
@@ -62,26 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Top Actions with 3D Volumetric Styling */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          {/* Install PWA Button */}
-          {installPrompt && (
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={(e) => {
-                (e.currentTarget as HTMLButtonElement).blur();
-                haptic.medium();
-                onInstall();
-              }}
-              style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}
-              className="btn-volumetric-cyan px-2.5 py-1 sm:px-3 sm:py-1.5 text-xs rounded-full flex items-center gap-1.5 outline-none shrink-0"
-              title="Установить как приложение"
-            >
-              <Download className="w-3.5 h-3.5 text-white" />
-              <span className="hidden sm:inline text-white">Установить</span>
-            </button>
-          )}
-
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           {/* Smart Live Sync & Network Status Button (3D Circle) */}
           <button
             type="button"
@@ -92,7 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             disabled={isSyncing || syncing}
             style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}
-            className="btn-volumetric-glass w-8 h-8 sm:w-9 sm:h-9 rounded-full relative flex items-center justify-center text-slate-700 outline-none shrink-0 cursor-pointer"
+            className="btn-volumetric-glass w-9 h-9 sm:w-10 sm:h-10 rounded-full relative flex items-center justify-center p-0 text-slate-700 outline-none shrink-0 cursor-pointer"
             title={
               !isOnline
                 ? 'Офлайн: интернет отключён. Приложение полностью работает автономно'
@@ -106,12 +85,12 @@ export const Header: React.FC<HeaderProps> = ({
             }
           >
             {!isOnline ? (
-              <CloudOff className="w-4 h-4 text-slate-400" />
+              <CloudOff className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
             ) : isSyncing || syncing ? (
-              <RefreshCw className="w-4 h-4 text-amber-600 animate-spin" />
+              <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600 animate-spin" />
             ) : (
               <div className="relative flex items-center justify-center">
-                <RefreshCw className={`w-3.5 h-3.5 text-slate-600 transition-transform ${syncing ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 text-slate-600 transition-transform ${syncing ? 'animate-spin' : ''}`} />
                 {/* Active Online Indicator (Green dot) */}
                 <span className="absolute -top-1 -right-1 flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -131,15 +110,13 @@ export const Header: React.FC<HeaderProps> = ({
               onOpenAccount();
             }}
             style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}
-            className="btn-volumetric-glass w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-800 outline-none shrink-0 cursor-pointer"
+            className="btn-volumetric-glass w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center p-0 text-slate-700 outline-none shrink-0 cursor-pointer"
             title={`Управление аккаунтом (${activeAccountEmail || 'default'})`}
           >
-            <div className="w-5 h-5 rounded-full bg-orange-500/20 text-orange-900 flex items-center justify-center shrink-0">
-              <User className="w-3.5 h-3.5" />
-            </div>
+            <User className="w-4 h-4 sm:w-5 sm:h-5 text-slate-700" />
           </button>
 
-          {/* Add Task Button with Volumetric 3D Orange */}
+          {/* Add Task Button with Volumetric 3D Orange (3D Circle) */}
           <button
             type="button"
             onMouseDown={(e) => e.preventDefault()}
@@ -149,7 +126,7 @@ export const Header: React.FC<HeaderProps> = ({
               onOpenNewTask();
             }}
             style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}
-            className="btn-volumetric-cyan w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-white outline-none shrink-0"
+            className="btn-volumetric-cyan w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center p-0 text-white outline-none shrink-0 cursor-pointer"
             title="Добавить действие"
           >
             <Plus className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.8] text-white" />

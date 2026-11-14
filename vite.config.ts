@@ -11,13 +11,14 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'icons.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.ico', 'favicon.svg', 'icons.svg', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'Ежедневки — Трекер регулярных действий',
         short_name: 'Ежедневки',
         description: 'Удобный трекер ежедневных дел с корзиной, умным исключением воскресений и статистикой',
         theme_color: '#fbf8f3',
         background_color: '#fbf8f3',
+        lang: 'ru',
         display: 'standalone',
         orientation: 'portrait',
         icons: [

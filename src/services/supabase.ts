@@ -32,17 +32,13 @@ export function getSupabaseClient(url?: string, key?: string): SupabaseClient | 
 }
 
 /**
- * Deep merges remote AppData with local AppData safely:
- * - Preserves tasks from both
- * - Unites completedTaskIds and timestamps for every date
+ * One-time safe merge for initial account connection
  */
 export function mergeAppData(remote: AppData, local: AppData): AppData {
-  // Merge tasks by id
   const taskMap = new Map<string, TaskTemplate>();
   (remote.tasks || []).forEach((t) => taskMap.set(t.id, t));
   (local.tasks || []).forEach((t) => taskMap.set(t.id, t));
 
-  // Merge history by date
   const allDates = new Set([
     ...Object.keys(remote.history || {}),
     ...Object.keys(local.history || {}),
@@ -62,11 +58,12 @@ export function mergeAppData(remote: AppData, local: AppData): AppData {
       return;
     }
 
-    // Both exist: union completedTaskIds
-    const completedSet = new Set([
-      ...(rLog.completedTaskIds || []),
-      ...(lLog.completedTaskIds || []),
-    ]);
+    // Prefer local completedTaskIds if local has records for this day
+    const completedSet = new Set(
+      lLog.completedTaskIds?.length
+        ? lLog.completedTaskIds
+        : rLog.completedTaskIds || []
+    );
 
     mergedHistory[dateStr] = {
       completedTaskIds: Array.from(completedSet),
@@ -79,6 +76,37 @@ export function mergeAppData(remote: AppData, local: AppData): AppData {
     tasks: Array.from(taskMap.values()),
     history: mergedHistory,
   };
+}
+
+/**
+ * Push local data to Supabase (Called when user mutates data locally)
+ */
+export async function pushToCloud(
+  appData: AppData,
+  url?: string,
+  key?: string
+): Promise<{ success: boolean; updatedAt?: string; message?: string }> {
+  const client = getSupabaseClient(url, key);
+  if (!client) return { success: false, message: 'Supabase не настроен' };
+
+  const email = appData?.account?.email || 'default@routine.app';
+  const now = new Date().toISOString();
+
+  try {
+    const { error } = await client.from('user_routines').upsert({
+      user_email: email,
+      data: appData,
+      updated_at: now,
+    });
+
+    if (error) {
+      console.warn('Push error to Supabase:', error);
+      return { success: false, message: error.message };
+    }
+    return { success: true, updatedAt: now };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'Ошибка отправки' };
+  }
 }
 
 /**
@@ -117,14 +145,13 @@ export async function fetchFromCloud(
 }
 
 /**
- * Cloud sync function:
- * Full bidirectional sync with merge and push
+ * Cloud sync function (Used for initial connection and manual sync button)
  */
 export async function syncWithCloud(
   appData: AppData,
   url?: string,
   key?: string
-): Promise<{ success: boolean; data?: AppData; message?: string }> {
+): Promise<{ success: boolean; data?: AppData; updatedAt?: string; message?: string }> {
   const client = getSupabaseClient(url, key);
   if (!client) {
     return {
@@ -147,20 +174,23 @@ export async function syncWithCloud(
       console.warn('Fetch error from Supabase:', fetchError);
     }
 
+    const now = new Date().toISOString();
+
     if (remoteRecord && remoteRecord.data) {
       const remoteData = remoteRecord.data as AppData;
+      // On initial manual sync, if remote exists, merge once
       const mergedData = mergeAppData(remoteData, appData);
 
-      // Push merged back to Supabase
       await client.from('user_routines').upsert({
         user_email: email,
         data: mergedData,
-        updated_at: new Date().toISOString(),
+        updated_at: now,
       });
 
       return {
         success: true,
         data: mergedData,
+        updatedAt: now,
         message: 'Данные успешно синхронизированы с облаком!',
       };
     } else {
@@ -168,14 +198,19 @@ export async function syncWithCloud(
       const { error: upsertError } = await client.from('user_routines').upsert({
         user_email: email,
         data: appData,
-        updated_at: new Date().toISOString(),
+        updated_at: now,
       });
 
       if (upsertError) {
         return { success: false, message: `Ошибка загрузки в облако: ${upsertError.message}` };
       }
 
-      return { success: true, data: appData, message: 'Данные сохранены в облаке!' };
+      return {
+        success: true,
+        data: appData,
+        updatedAt: now,
+        message: 'Данные сохранены в облаке!',
+      };
     }
   } catch (error: any) {
     return { success: false, message: error?.message || 'Ошибка подключения к облаку' };

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { format, isSameDay, parseISO } from 'date-fns';
 import type { AppData, DayLog, DayOfWeek, TaskTemplate, UserAccount, ViewMode } from '../types';
 import {
@@ -11,7 +11,7 @@ import {
   getStoredCategories,
   saveStoredCategories,
 } from '../services/storage';
-import { syncWithCloud, getSupabaseClient, mergeAppData, fetchFromCloud } from '../services/supabase';
+import { syncWithCloud, pushToCloud, getSupabaseClient, fetchFromCloud } from '../services/supabase';
 
 interface RoutineContextType {
   // Navigation & Views
@@ -85,6 +85,11 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   });
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
 
+  // Sync state tracking refs to prevent loops and double-syncing
+  const isUserMutationRef = useRef<boolean>(false);
+  const lastPushedAtRef = useRef<string>('');
+  const lastRemoteUpdatedAtRef = useRef<string>('');
+
   const markPendingSync = () => {
     setHasPendingSync(true);
     try {
@@ -95,17 +100,41 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   // Save to localStorage when appData changes
   useEffect(() => {
     saveAppData(activeAccountEmail, appData);
-    markPendingSync();
+    if (isUserMutationRef.current) {
+      markPendingSync();
+    }
   }, [appData, activeAccountEmail]);
 
-  // Realtime: debounced auto-push to cloud on any local task or history change
+  // Auto-push to cloud ONLY on local user mutations (Debounced 800ms)
   useEffect(() => {
+    if (!isUserMutationRef.current) return;
     if (!appData?.account?.cloudSyncEnabled || !navigator.onLine) return;
-    const timeout = setTimeout(() => {
-      triggerSync();
-    }, 600);
+
+    const timeout = setTimeout(async () => {
+      isUserMutationRef.current = false;
+      setIsSyncing(true);
+      try {
+        const res = await pushToCloud(
+          appData,
+          appData?.account?.supabaseUrl,
+          appData?.account?.supabaseAnonKey
+        );
+        if (res.success && res.updatedAt) {
+          lastPushedAtRef.current = res.updatedAt;
+          lastRemoteUpdatedAtRef.current = res.updatedAt;
+          setHasPendingSync(false);
+          try {
+            localStorage.removeItem('routine_pending_sync');
+          } catch {}
+          setLastSyncTime(new Date());
+        }
+      } finally {
+        setTimeout(() => setIsSyncing(false), 400);
+      }
+    }, 800);
+
     return () => clearTimeout(timeout);
-  }, [appData.tasks, appData.history, appData?.account?.cloudSyncEnabled]);
+  }, [appData, appData?.account?.cloudSyncEnabled]);
 
   // Keep date updated if day changes at midnight
   useEffect(() => {
@@ -156,6 +185,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   // Move task to trash for the specified date (defaults to selectedDate)
   const moveToTrash = (taskId: string, targetDate = selectedDate) => {
+    isUserMutationRef.current = true;
     const dateStr = format(targetDate, 'yyyy-MM-dd');
     setAppData((prev) => {
       const existingLog = prev.history[dateStr] || { completedTaskIds: [], completedAt: {} };
@@ -181,6 +211,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   // Restore task from trash back to active list for today
   const restoreFromTrash = (taskId: string, targetDate = selectedDate) => {
+    isUserMutationRef.current = true;
     const dateStr = format(targetDate, 'yyyy-MM-dd');
     setAppData((prev) => {
       const existingLog = prev.history[dateStr];
@@ -205,6 +236,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   // Create new task template
   const createTask = (newTaskData: Omit<TaskTemplate, 'id' | 'createdAt' | 'order'>) => {
+    isUserMutationRef.current = true;
     const newTask: TaskTemplate = {
       ...newTaskData,
       id: 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -219,6 +251,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   // Update existing task template
   const updateTask = (id: string, updates: Partial<TaskTemplate>) => {
+    isUserMutationRef.current = true;
     setAppData((prev) => ({
       ...prev,
       tasks: prev.tasks.map((task) => (task.id === id ? { ...task, ...updates } : task)),
@@ -227,6 +260,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   // Delete task template permanently (from template list completely)
   const deleteTaskPermanently = (id: string) => {
+    isUserMutationRef.current = true;
     setAppData((prev) => ({
       ...prev,
       tasks: prev.tasks.filter((task) => task.id !== id),
@@ -234,6 +268,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const reorderTasks = (newTasks: TaskTemplate[]) => {
+    isUserMutationRef.current = true;
     setAppData((prev) => ({
       ...prev,
       tasks: newTasks.map((t, idx) => ({ ...t, order: idx + 1 })),
@@ -251,6 +286,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const updateAccountSettings = (updates: Partial<UserAccount>) => {
+    isUserMutationRef.current = true;
     setAppData((prev) => ({
       ...prev,
       account: { ...(prev.account || { email: activeAccountEmail, displayName: activeAccountEmail.split('@')[0], cloudSyncEnabled: false }), ...updates },
@@ -269,7 +305,12 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
         appData?.account?.supabaseAnonKey
       );
       if (res.success && res.data) {
+        isUserMutationRef.current = false;
         setAppData(res.data);
+        if (res.updatedAt) {
+          lastPushedAtRef.current = res.updatedAt;
+          lastRemoteUpdatedAtRef.current = res.updatedAt;
+        }
         setHasPendingSync(false);
         try {
           localStorage.removeItem('routine_pending_sync');
@@ -278,7 +319,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
       }
       return res;
     } finally {
-      setIsSyncing(false);
+      setTimeout(() => setIsSyncing(false), 400);
     }
   };
 
@@ -286,18 +327,13 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   useEffect(() => {
     if (!appData?.account?.cloudSyncEnabled) return;
 
-    // 1. Initial sync on mount/activation
-    if (navigator.onLine) {
-      triggerSync();
-    }
-
-    // 2. Realtime WebSocket subscription
     const client = getSupabaseClient(
       appData?.account?.supabaseUrl,
       appData?.account?.supabaseAnonKey
     );
     const email = appData?.account?.email || 'default@routine.app';
 
+    // 1. Realtime WebSocket subscription
     let channel: any = null;
     if (client) {
       try {
@@ -312,8 +348,15 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
               filter: `user_email=eq.${email}`,
             },
             (payload: any) => {
-              if (payload?.new?.data) {
-                setAppData((prev) => mergeAppData(payload.new.data as AppData, prev));
+              const remoteUpdated = payload?.new?.updated_at;
+              // Ignore if it's our own update echoing back
+              if (remoteUpdated && remoteUpdated === lastPushedAtRef.current) {
+                return;
+              }
+              if (payload?.new?.data && remoteUpdated && remoteUpdated > (lastPushedAtRef.current || '')) {
+                isUserMutationRef.current = false;
+                setAppData(payload.new.data as AppData);
+                lastRemoteUpdatedAtRef.current = remoteUpdated;
                 setLastSyncTime(new Date());
               }
             }
@@ -324,7 +367,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
       }
     }
 
-    // 3. Live polling (every 7 seconds while tab is active)
+    // 2. Periodic background check (every 15 seconds, ONLY if tab is active)
     const pollInterval = setInterval(async () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
         const res = await fetchFromCloud(
@@ -332,14 +375,22 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
           appData?.account?.supabaseAnonKey,
           email
         );
-        if (res.success && res.data) {
-          setAppData((prev) => mergeAppData(res.data!, prev));
+        if (
+          res.success &&
+          res.data &&
+          res.updatedAt &&
+          res.updatedAt > (lastRemoteUpdatedAtRef.current || '') &&
+          res.updatedAt > (lastPushedAtRef.current || '')
+        ) {
+          isUserMutationRef.current = false;
+          setAppData(res.data);
+          lastRemoteUpdatedAtRef.current = res.updatedAt;
           setLastSyncTime(new Date());
         }
       }
-    }, 7000);
+    }, 15000);
 
-    // 4. Online and visibilitychange listeners
+    // 3. Online and visibilitychange listeners
     const handleOnline = () => {
       setIsOnline(true);
       triggerSync();
@@ -349,9 +400,25 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
       setIsOnline(false);
     };
 
-    const handleVisibility = () => {
+    const handleVisibility = async () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
-        triggerSync();
+        const res = await fetchFromCloud(
+          appData?.account?.supabaseUrl,
+          appData?.account?.supabaseAnonKey,
+          email
+        );
+        if (
+          res.success &&
+          res.data &&
+          res.updatedAt &&
+          res.updatedAt > (lastRemoteUpdatedAtRef.current || '') &&
+          res.updatedAt > (lastPushedAtRef.current || '')
+        ) {
+          isUserMutationRef.current = false;
+          setAppData(res.data);
+          lastRemoteUpdatedAtRef.current = res.updatedAt;
+          setLastSyncTime(new Date());
+        }
       }
     };
 
@@ -383,6 +450,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const importBackup = (newData: AppData) => {
     if (newData && Array.isArray(newData.tasks)) {
+      isUserMutationRef.current = true;
       setAppData(newData);
     }
   };
@@ -407,6 +475,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
       return updated;
     });
     // If deleted category was used in any tasks, those tasks now have category: undefined
+    isUserMutationRef.current = true;
     setAppData((prev) => ({
       ...prev,
       tasks: prev.tasks.map((task) =>

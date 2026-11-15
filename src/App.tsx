@@ -8,6 +8,7 @@ import { MonthView } from './components/MonthView';
 import { YearView } from './components/YearView';
 import { TaskModal } from './components/TaskModal';
 import { AccountModal } from './components/AccountModal';
+import { PinLock, isAppUnlocked, lockApp } from './components/PinLock';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import type { TaskTemplate } from './types';
 import { haptic } from './utils/haptics';
@@ -18,9 +19,15 @@ const MainContent: React.FC<{
 }> = ({ installPrompt, onInstall }) => {
   const { viewMode, createTask, updateTask, deleteTaskPermanently } = useRoutines();
 
+  const [isLocked, setIsLocked] = useState(() => !isAppUnlocked());
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState<TaskTemplate | null>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+
+  // If locked, render PIN screen exclusively
+  if (isLocked) {
+    return <PinLock onUnlock={() => setIsLocked(false)} />;
+  }
 
   const handleOpenNewTask = () => {
     haptic.medium();
@@ -88,6 +95,11 @@ const MainContent: React.FC<{
       <AccountModal
         isOpen={isAccountModalOpen}
         onClose={() => setIsAccountModalOpen(false)}
+        onLockNow={() => {
+          lockApp();
+          setIsAccountModalOpen(false);
+          setIsLocked(true);
+        }}
       />
     </div>
   );

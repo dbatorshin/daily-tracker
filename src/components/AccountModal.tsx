@@ -11,16 +11,20 @@ import {
   Shield,
   HelpCircle,
   ExternalLink,
+  Lock,
+  KeyRound,
 } from 'lucide-react';
 import { useRoutines } from '../context/RoutineContext';
 import { haptic } from '../utils/haptics';
+import { isPinConfigured, removeAppPin, lockApp } from './PinLock';
 
 interface AccountModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onLockNow?: () => void;
 }
 
-export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) => {
+export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, onLockNow }) => {
   const {
     activeAccountEmail,
     knownAccounts,
@@ -39,6 +43,13 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [showSupabaseHelp, setShowHelp] = useState(false);
+  const [hasPinState, setHasPinState] = useState(() => isPinConfigured());
+
+  useEffect(() => {
+    if (isOpen) {
+      setHasPinState(isPinConfigured());
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (appData?.account) {
@@ -362,6 +373,55 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose }) =
                   className="hidden"
                 />
               </label>
+            </div>
+          </div>
+
+          {/* Section 4: Security & PIN Code */}
+          <div className="pt-4 border-t border-orange-100">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-2">
+              <Lock className="w-4 h-4 text-amber-600" />
+              Безопасность и PIN-код
+            </h4>
+            <p className="text-xs text-slate-600 font-medium mb-3">
+              {hasPinState
+                ? 'PIN-код активен. Доступ к вашим задачам защищён паролем.'
+                : 'Задайте PIN-код, чтобы никто посторонний не мог открыть ваш список задач.'}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  haptic.medium();
+                  lockApp();
+                  if (onLockNow) {
+                    onLockNow();
+                  } else {
+                    window.location.reload();
+                  }
+                }}
+                style={{ outline: 'none' }}
+                className="btn-volumetric-glass flex items-center gap-1.5 px-3.5 py-2 rounded-full text-slate-700 text-xs font-bold outline-none cursor-pointer"
+              >
+                <Lock className="w-3.5 h-3.5 text-amber-600" />
+                <span>Заблокировать сейчас</span>
+              </button>
+              {hasPinState && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('Сбросить PIN-код? После этого вход будет свободным.')) {
+                      removeAppPin();
+                      setHasPinState(false);
+                      haptic.success();
+                    }
+                  }}
+                  style={{ outline: 'none' }}
+                  className="btn-volumetric-glass flex items-center gap-1.5 px-3.5 py-2 rounded-full text-rose-700 text-xs font-bold outline-none cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Сбросить PIN</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

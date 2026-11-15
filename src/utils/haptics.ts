@@ -38,4 +38,13 @@ export const haptic = {
       } catch {}
     }
   },
+
+  // Error vibration pattern
+  error: () => {
+    if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate([40, 60, 40]);
+      } catch {}
+    }
+  },
 };

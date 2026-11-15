@@ -121,9 +121,9 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
   };
 
   // Date formatting
-  const formattedDateTitle = format(selectedDate, 'EEEE, d MMMM', { locale: ru });
-  const capitalizedTitle =
-    formattedDateTitle.charAt(0).toUpperCase() + formattedDateTitle.slice(1);
+  const rawDayOfWeek = format(selectedDate, 'EEEE', { locale: ru });
+  const capitalizedDayOfWeek = rawDayOfWeek.charAt(0).toUpperCase() + rawDayOfWeek.slice(1);
+  const formattedDayAndMonth = format(selectedDate, 'd MMMM', { locale: ru }).toLowerCase();
 
   // Incomplete past days info (Point 9 & 10: under day card, red-tinted reminder)
   const incompleteDaysInfo = useMemo(() => {
@@ -152,17 +152,18 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
       <div className={`glass-panel p-5 sm:p-6${isSaturday ? ' saturday-header' : ''}`}>
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base sm:text-lg font-black text-slate-800 capitalize tracking-tight">
-                {capitalizedTitle}
+            <div className="flex items-start sm:items-center gap-2">
+              <h2 className="text-base sm:text-lg font-black text-slate-800 tracking-tight leading-tight">
+                <span>{capitalizedDayOfWeek},</span>{' '}
+                <span className="block sm:inline whitespace-nowrap">{formattedDayAndMonth}</span>
               </h2>
               {isCurrentToday && (
-                <span className="glass-status-pill text-[10px] font-black">
+                <span className="glass-status-pill text-[10px] font-black shrink-0 mt-0.5 sm:mt-0">
                   Сегодня
                 </span>
               )}
               {isSaturday && (
-                <span className="text-[10px] font-black text-orange-700 bg-orange-100/70 px-2 py-0.5 rounded-full border border-orange-300/60">
+                <span className="text-[10px] font-black text-orange-700 bg-orange-100/70 px-2 py-0.5 rounded-full border border-orange-300/60 shrink-0 mt-0.5 sm:mt-0">
                   Суббота
                 </span>
               )}

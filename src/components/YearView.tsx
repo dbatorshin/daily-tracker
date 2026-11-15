@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useEffect, useRef } from 'react';
 import {
   format,
   startOfYear,
@@ -24,6 +24,22 @@ export const YearView: React.FC = () => {
   const currentYear = getYear(selectedDate);
   const yearStart = startOfYear(selectedDate);
   const yearEnd = endOfYear(selectedDate);
+
+  const activeMonthRef = useRef<HTMLDivElement>(null);
+
+  // Auto-center year view on the active / selected month (analogous to WeekView centering)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (activeMonthRef.current) {
+        activeMonthRef.current.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'center',
+        });
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [currentYear, selectedDate]);
 
   const daysInYear = useMemo(() => {
     return eachDayOfInterval({ start: yearStart, end: yearEnd });
@@ -283,16 +299,30 @@ export const YearView: React.FC = () => {
       {/* 12-Month Calendar Grid — Spacious 3 or 4 columns with square aspect tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
         {monthsData.map((month) => {
+          const isActiveMonth = month.monthIndex === selectedDate.getMonth();
+
           return (
             <div
               key={month.monthIndex}
-              className="glass-panel p-4 flex flex-col justify-between transition-shadow hover:shadow-md"
+              ref={isActiveMonth ? activeMonthRef : undefined}
+              className={`glass-panel p-4 flex flex-col justify-between transition-all duration-300 ${
+                isActiveMonth
+                  ? 'ring-2 ring-orange-500/50 shadow-lg bg-gradient-to-b from-[#fffbf5] to-[#fbf8f3]'
+                  : 'hover:shadow-md'
+              }`}
             >
               {/* Month Header */}
               <div className="flex items-center justify-between mb-2.5 pb-2 border-b border-[#e9e0d4]">
-                <span className="text-sm font-black text-slate-800 tracking-tight">
-                  {month.capitalizedMonth}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-black text-slate-800 tracking-tight">
+                    {month.capitalizedMonth}
+                  </span>
+                  {isActiveMonth && (
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-orange-500/15 text-orange-950 border border-orange-400/30">
+                      Текущий
+                    </span>
+                  )}
+                </div>
                 {month.monthRate !== null ? (
                   <span
                     className={`text-[11px] font-black px-2 py-0.5 rounded-full ${

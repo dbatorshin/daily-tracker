@@ -62,7 +62,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
     appData,
   } = useRoutines();
 
-  const [isTrashOpen, setIsTrashOpen] = useState(true);
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [justCompletedId, setJustCompletedId] = useState<string | null>(null);
 
   const isCurrentToday = isToday(selectedDate);

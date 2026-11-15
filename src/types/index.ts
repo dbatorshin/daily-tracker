@@ -15,6 +15,7 @@ export interface TaskTemplate {
 export interface DayLog {
   completedTaskIds: string[]; // task IDs completed (moved to trash) for this specific date
   completedAt: Record<string, string>; // taskId -> ISO timestamp
+  animationIndex?: number; // Deterministic animation index (0..9) synced across all devices
 }
 
 export interface UserAccount {

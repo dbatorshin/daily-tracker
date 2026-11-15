@@ -69,6 +69,9 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
   const isSunday = selectedDate.getDay() === 0;
   const isSaturday = selectedDate.getDay() === 6;
 
+  const selectedDateStr = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
+  const currentDayLog = appData?.history[selectedDateStr];
+
   const streakDays = useMemo(() => {
     let count = 0;
     let checkDate = new Date();
@@ -264,7 +267,12 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
               </button>
             </div>
           ) : (
-            <CelebrationCard streakDays={streakDays} totalTasks={totalScheduledToday} />
+            <CelebrationCard
+              streakDays={streakDays}
+              totalTasks={totalScheduledToday}
+              dateStr={selectedDateStr}
+              variantIndex={currentDayLog?.animationIndex}
+            />
           )
         ) : (
           <div className="space-y-3">

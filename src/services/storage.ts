@@ -165,9 +165,17 @@ export function generateNovemberHistory(tasks: TaskTemplate[]): Record<string, i
     scheduled.forEach((t) => {
       completedAt[t.id] = `2026-11-${dayStr}T10:00:00.000Z`;
     });
+    let hash = 0;
+    for (let i = 0; i < dateStr.length; i++) {
+      hash = (hash << 5) - hash + dateStr.charCodeAt(i);
+      hash |= 0;
+    }
+    const animationIndex = Math.abs(hash) % 10;
+
     history[dateStr] = {
       completedTaskIds,
       completedAt,
+      animationIndex,
     };
   }
   return history;

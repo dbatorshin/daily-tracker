@@ -191,12 +191,26 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
       const existingLog = prev.history[dateStr] || { completedTaskIds: [], completedAt: {} };
       if (existingLog.completedTaskIds.includes(taskId)) return prev;
 
+      const newCompletedIds = [...existingLog.completedTaskIds, taskId];
+
+      // Deterministic animation index for this date - identical across all devices
+      let animationIndex = existingLog.animationIndex;
+      if (animationIndex === undefined) {
+        let hash = 0;
+        for (let i = 0; i < dateStr.length; i++) {
+          hash = (hash << 5) - hash + dateStr.charCodeAt(i);
+          hash |= 0;
+        }
+        animationIndex = Math.abs(hash) % 10;
+      }
+
       const updatedLog: DayLog = {
-        completedTaskIds: [...existingLog.completedTaskIds, taskId],
+        completedTaskIds: newCompletedIds,
         completedAt: {
           ...existingLog.completedAt,
           [taskId]: new Date().toISOString(),
         },
+        animationIndex,
       };
 
       return {

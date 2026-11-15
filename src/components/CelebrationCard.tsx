@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { RotateCw, Check, Sparkles } from 'lucide-react';
+import React, { useEffect, useMemo } from 'react';
+import { Check, Sparkles } from 'lucide-react';
 import { haptic } from '../utils/haptics';
 
 interface CelebrationCardProps {
   streakDays?: number;
   totalTasks: number;
+  variantIndex?: number;
+  dateStr?: string;
 }
 
 export type AnimationType =
@@ -89,32 +91,34 @@ const VARIANTS: AnimationVariant[] = [
   },
 ];
 
+export function getDeterministicAnimationIndex(dateStr?: string): number {
+  if (!dateStr) return 0;
+  let hash = 0;
+  for (let i = 0; i < dateStr.length; i++) {
+    hash = (hash << 5) - hash + dateStr.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) % VARIANTS.length;
+}
+
 export const CelebrationCard: React.FC<CelebrationCardProps> = ({
   streakDays = 1,
   totalTasks,
+  variantIndex: propVariantIndex,
+  dateStr,
 }) => {
-  // Select a random animation variant on initial render
-  const [variantIndex, setVariantIndex] = useState(() =>
-    Math.floor(Math.random() * VARIANTS.length)
-  );
-  const [replayKey, setReplayKey] = useState(0);
+  const chosenIndex = useMemo(() => {
+    if (propVariantIndex !== undefined && propVariantIndex >= 0 && propVariantIndex < VARIANTS.length) {
+      return propVariantIndex;
+    }
+    return getDeterministicAnimationIndex(dateStr);
+  }, [propVariantIndex, dateStr]);
 
-  const currentVariant = VARIANTS[variantIndex];
+  const currentVariant = VARIANTS[chosenIndex];
 
   useEffect(() => {
     haptic.celebrate();
-  }, [variantIndex, replayKey]);
-
-  const handleNextRandom = () => {
-    haptic.medium();
-    // Pick another random variant distinct from current
-    setVariantIndex((prev) => {
-      let next = Math.floor(Math.random() * VARIANTS.length);
-      if (next === prev) next = (next + 1) % VARIANTS.length;
-      return next;
-    });
-    setReplayKey((k) => k + 1);
-  };
+  }, [chosenIndex]);
 
   return (
     <div className="glass-panel p-6 sm:p-7 text-center overflow-hidden relative select-none">
@@ -123,7 +127,7 @@ export const CelebrationCard: React.FC<CelebrationCardProps> = ({
 
       {/* Dynamic 3D Animation Arena */}
       <div
-        key={`${currentVariant.id}-${replayKey}`}
+        key={`${currentVariant.id}-${chosenIndex}`}
         className="relative w-44 h-44 mx-auto flex items-center justify-center mb-3"
       >
         {/* VARIANT 0: Confetti Spheres Burst */}
@@ -445,25 +449,6 @@ export const CelebrationCard: React.FC<CelebrationCardProps> = ({
         <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-500/10 text-emerald-800 border border-emerald-300/40">
           🔥 Серия: {streakDays} {streakDays === 1 ? 'день' : streakDays < 5 ? 'дня' : 'дней'}
         </span>
-      </div>
-
-      {/* Interactive Switcher / Replay Button */}
-      <div className="mt-4 pt-3 border-t border-orange-100 flex items-center justify-center gap-2">
-        <div
-          role="button"
-          tabIndex={-1}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          onClick={handleNextRandom}
-          style={{ outline: 'none', border: 'none', WebkitTapHighlightColor: 'transparent', userSelect: 'none' }}
-          className="btn-volumetric-glass px-4 py-1.5 text-xs font-extrabold text-slate-700 rounded-full flex items-center gap-1.5 cursor-pointer hover:text-slate-900 transition"
-          title="Случайная анимация"
-        >
-          <RotateCw className="w-3.5 h-3.5" />
-          <span>Случайная анимация ({variantIndex + 1}/10)</span>
-        </div>
       </div>
     </div>
   );

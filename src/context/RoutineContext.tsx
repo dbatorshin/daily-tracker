@@ -10,6 +10,7 @@ import {
   exportDataToJson,
   getStoredCategories,
   saveStoredCategories,
+  ensureCompleteYear2026,
 } from '../services/storage';
 import { syncWithCloud, pushToCloud, getSupabaseClient, fetchFromCloud } from '../services/supabase';
 
@@ -369,7 +370,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
               }
               if (payload?.new?.data && remoteUpdated && remoteUpdated > (lastPushedAtRef.current || '')) {
                 isUserMutationRef.current = false;
-                setAppData(payload.new.data as AppData);
+                setAppData(ensureCompleteYear2026(payload.new.data as AppData));
                 lastRemoteUpdatedAtRef.current = remoteUpdated;
                 setLastSyncTime(new Date());
               }
@@ -397,7 +398,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
           res.updatedAt > (lastPushedAtRef.current || '')
         ) {
           isUserMutationRef.current = false;
-          setAppData(res.data);
+          setAppData(ensureCompleteYear2026(res.data));
           lastRemoteUpdatedAtRef.current = res.updatedAt;
           setLastSyncTime(new Date());
         }
@@ -429,7 +430,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
           res.updatedAt > (lastPushedAtRef.current || '')
         ) {
           isUserMutationRef.current = false;
-          setAppData(res.data);
+          setAppData(ensureCompleteYear2026(res.data));
           lastRemoteUpdatedAtRef.current = res.updatedAt;
           setLastSyncTime(new Date());
         }
@@ -458,6 +459,16 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
     appData?.account?.email,
   ]);
 
+  // Startup sync: if cloud sync is enabled, sync version 6 complete year data to cloud on mount
+  const startupSyncDoneRef = useRef(false);
+  useEffect(() => {
+    if (startupSyncDoneRef.current) return;
+    if (appData?.account?.cloudSyncEnabled && navigator.onLine) {
+      startupSyncDoneRef.current = true;
+      triggerSync();
+    }
+  }, [appData?.account?.cloudSyncEnabled]);
+
   const exportBackup = () => {
     exportDataToJson(appData);
   };
@@ -465,7 +476,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   const importBackup = (newData: AppData) => {
     if (newData && Array.isArray(newData.tasks)) {
       isUserMutationRef.current = true;
-      setAppData(newData);
+      setAppData(ensureCompleteYear2026(newData));
     }
   };
 

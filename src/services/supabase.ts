@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, TaskTemplate, DayLog } from '../types';
+import { ensureCompleteYear2026 } from './storage';
 
 let cachedClient: SupabaseClient | null = null;
 let currentUrl: string | null = null;
@@ -68,14 +69,15 @@ export function mergeAppData(remote: AppData, local: AppData): AppData {
     mergedHistory[dateStr] = {
       completedTaskIds: Array.from(completedSet),
       completedAt: { ...(rLog.completedAt || {}), ...(lLog.completedAt || {}) },
+      animationIndex: lLog.animationIndex ?? rLog.animationIndex,
     };
   });
 
-  return {
+  return ensureCompleteYear2026({
     ...local,
     tasks: Array.from(taskMap.values()),
     history: mergedHistory,
-  };
+  });
 }
 
 /**
@@ -134,7 +136,7 @@ export async function fetchFromCloud(
     if (remoteRecord && remoteRecord.data) {
       return {
         success: true,
-        data: remoteRecord.data as AppData,
+        data: ensureCompleteYear2026(remoteRecord.data as AppData),
         updatedAt: remoteRecord.updated_at,
       };
     }

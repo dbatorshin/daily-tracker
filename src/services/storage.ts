@@ -145,26 +145,30 @@ export function saveStoredCategories(categories: string[]): void {
   }
 }
 
-const CURRENT_VERSION = 5;
+export const CURRENT_VERSION = 6;
 const STORAGE_KEY_PREFIX = 'daily_routines_data_';
 const CURRENT_EMAIL_KEY = 'daily_routines_active_email';
 const ALL_ACCOUNTS_KEY = 'daily_routines_all_emails';
 
-// Generate complete history for Nov 1 to Nov 14, 2026, and NO tasks before Nov 2026
-export function generateNovemberHistory(tasks: TaskTemplate[]): Record<string, import('../types').DayLog> {
+// Generate complete history for the entire year 2026 (Jan 1, 2026 to Nov 15, 2026 inclusive)
+export function generateYear2026History(tasks: TaskTemplate[]): Record<string, import('../types').DayLog> {
   const history: Record<string, import('../types').DayLog> = {};
-  for (let d = 1; d <= 14; d++) {
-    const dayStr = d < 10 ? `0${d}` : `${d}`;
-    const dateStr = `2026-11-${dayStr}`;
-    // In 2026, month index 10 is November. 2026-11-01 was Sunday (day 0)
-    const dateObj = new Date(2026, 10, d);
-    const dayOfWeek = dateObj.getDay() as import('../types').DayOfWeek;
+  const cur = new Date(2026, 0, 1); // 2026-01-01
+  while (true) {
+    const y = cur.getFullYear();
+    const m = String(cur.getMonth() + 1).padStart(2, '0');
+    const d = String(cur.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+    if (dateStr > '2026-11-15') break;
+
+    const dayOfWeek = cur.getDay() as import('../types').DayOfWeek;
     const scheduled = tasks.filter((t) => t.daysOfWeek.includes(dayOfWeek));
     const completedTaskIds = scheduled.map((t) => t.id);
     const completedAt: Record<string, string> = {};
     scheduled.forEach((t) => {
-      completedAt[t.id] = `2026-11-${dayStr}T10:00:00.000Z`;
+      completedAt[t.id] = `${dateStr}T10:00:00.000Z`;
     });
+
     let hash = 0;
     for (let i = 0; i < dateStr.length; i++) {
       hash = (hash << 5) - hash + dateStr.charCodeAt(i);
@@ -177,8 +181,45 @@ export function generateNovemberHistory(tasks: TaskTemplate[]): Record<string, i
       completedAt,
       animationIndex,
     };
+
+    cur.setDate(cur.getDate() + 1);
   }
   return history;
+}
+
+// Backward compatibility alias
+export function generateNovemberHistory(tasks: TaskTemplate[]): Record<string, import('../types').DayLog> {
+  return generateYear2026History(tasks);
+}
+
+/**
+ * Ensures all dates in 2026 up to and including Nov 15 are 100% completed.
+ * Purges obsolete pre-2026 dates.
+ */
+export function ensureCompleteYear2026(data: AppData): AppData {
+  const tasks = data.tasks && data.tasks.length > 0 ? data.tasks : DEFAULT_TASKS;
+  const rawHistory = data.history || {};
+  const yearHistory = generateYear2026History(tasks);
+
+  // Keep only 2026 dates
+  const cleanedHistory: Record<string, import('../types').DayLog> = {};
+  for (const [k, v] of Object.entries(rawHistory)) {
+    if (k >= '2026-01-01') {
+      cleanedHistory[k] = v;
+    }
+  }
+
+  // Guarantee every day from Jan 1, 2026 to Nov 15, 2026 inclusive is 100% completed
+  for (const [dateStr, dayLog] of Object.entries(yearHistory)) {
+    cleanedHistory[dateStr] = dayLog;
+  }
+
+  return {
+    ...data,
+    version: CURRENT_VERSION,
+    tasks,
+    history: cleanedHistory,
+  };
 }
 
 export function getDefaultAccount(email = 'user@example.com'): UserAccount {
@@ -231,73 +272,34 @@ export function loadAppData(email: string): AppData {
     if (raw) {
       const data: AppData = JSON.parse(raw);
       if (data && Array.isArray(data.tasks)) {
-        const tasks = data.tasks.length > 0 ? data.tasks : DEFAULT_TASKS;
-
-        // Clean out any historical dates before Nov 1, 2026 (October and earlier)
-        const cleanedHistory: Record<string, import('../types').DayLog> = {};
-        for (const [k, v] of Object.entries(data.history || {})) {
-          if (k >= '2026-11-01') {
-            cleanedHistory[k] = v;
-          }
-        }
-
-        // Migration or initial population for version < 3
         const safeAccount = (data.account && typeof data.account === 'object')
           ? { ...getDefaultAccount(email), ...data.account }
           : getDefaultAccount(email);
 
-        if (!data.version || data.version < CURRENT_VERSION) {
-          const novHistory = generateNovemberHistory(tasks);
-          for (const [k, v] of Object.entries(novHistory)) {
-            cleanedHistory[k] = v;
-          }
-
-          const migrated: AppData = {
-            ...data,
-            version: CURRENT_VERSION,
-            account: safeAccount,
-            tasks,
-            history: cleanedHistory,
-          };
-          saveAppData(email, migrated);
-          return migrated;
-        }
-
-        // Ensure Nov 1-14 completed tasks exist and October/earlier are purged
-        const novHistory = generateNovemberHistory(tasks);
-        for (let d = 1; d <= 14; d++) {
-          const dStr = `2026-11-${d < 10 ? '0' + d : d}`;
-          if (!cleanedHistory[dStr] || cleanedHistory[dStr].completedTaskIds.length === 0) {
-            cleanedHistory[dStr] = novHistory[dStr];
-          }
-        }
-        // Explicitly ensure 2026-11-13 and 2026-11-14 have all scheduled tasks completed as requested
-        if (novHistory['2026-11-13']) {
-          cleanedHistory['2026-11-13'] = novHistory['2026-11-13'];
-        }
-        if (novHistory['2026-11-14']) {
-          cleanedHistory['2026-11-14'] = novHistory['2026-11-14'];
-        }
-
-        return {
+        const ensured = ensureCompleteYear2026({
           ...data,
           account: safeAccount,
-          history: cleanedHistory,
-        };
+        });
+
+        // Persist migrated version and full year history to storage
+        saveAppData(email, ensured);
+        return ensured;
       }
     }
   } catch (e) {
     console.error('Failed to load data from storage:', e);
   }
 
-  // Fallback initial data with Nov 1-12 completed and Nov 13 empty
-  const initialHistory = generateNovemberHistory(DEFAULT_TASKS);
-  return {
+  // Fallback initial data with all 2026 days through Nov 15 completed
+  const initialHistory = generateYear2026History(DEFAULT_TASKS);
+  const initialData: AppData = {
     version: CURRENT_VERSION,
     account: getDefaultAccount(email),
     tasks: DEFAULT_TASKS,
     history: initialHistory,
   };
+  saveAppData(email, initialData);
+  return initialData;
 }
 
 export function saveAppData(email: string, data: AppData): void {

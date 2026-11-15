@@ -11,7 +11,7 @@ import {
   getStoredCategories,
   saveStoredCategories,
 } from '../services/storage';
-import { syncWithCloud } from '../services/supabase';
+import { syncWithCloud, getSupabaseClient, mergeAppData, fetchFromCloud } from '../services/supabase';
 
 interface RoutineContextType {
   // Navigation & Views
@@ -97,6 +97,15 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
     saveAppData(activeAccountEmail, appData);
     markPendingSync();
   }, [appData, activeAccountEmail]);
+
+  // Realtime: debounced auto-push to cloud on any local task or history change
+  useEffect(() => {
+    if (!appData?.account?.cloudSyncEnabled || !navigator.onLine) return;
+    const timeout = setTimeout(() => {
+      triggerSync();
+    }, 600);
+    return () => clearTimeout(timeout);
+  }, [appData.tasks, appData.history, appData?.account?.cloudSyncEnabled]);
 
   // Keep date updated if day changes at midnight
   useEffect(() => {
@@ -273,36 +282,100 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   };
 
-  // Auto-sync on network reconnection and window focus
+  // Real-time synchronization: WebSocket, live polling, and visibility listeners
   useEffect(() => {
+    if (!appData?.account?.cloudSyncEnabled) return;
+
+    // 1. Initial sync on mount/activation
+    if (navigator.onLine) {
+      triggerSync();
+    }
+
+    // 2. Realtime WebSocket subscription
+    const client = getSupabaseClient(
+      appData?.account?.supabaseUrl,
+      appData?.account?.supabaseAnonKey
+    );
+    const email = appData?.account?.email || 'default@routine.app';
+
+    let channel: any = null;
+    if (client) {
+      try {
+        channel = client
+          .channel('user_routines_realtime')
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'user_routines',
+              filter: `user_email=eq.${email}`,
+            },
+            (payload: any) => {
+              if (payload?.new?.data) {
+                setAppData((prev) => mergeAppData(payload.new.data as AppData, prev));
+                setLastSyncTime(new Date());
+              }
+            }
+          )
+          .subscribe();
+      } catch (err) {
+        console.warn('Realtime subscription error:', err);
+      }
+    }
+
+    // 3. Live polling (every 7 seconds while tab is active)
+    const pollInterval = setInterval(async () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        const res = await fetchFromCloud(
+          appData?.account?.supabaseUrl,
+          appData?.account?.supabaseAnonKey,
+          email
+        );
+        if (res.success && res.data) {
+          setAppData((prev) => mergeAppData(res.data!, prev));
+          setLastSyncTime(new Date());
+        }
+      }
+    }, 7000);
+
+    // 4. Online and visibilitychange listeners
     const handleOnline = () => {
       setIsOnline(true);
-      // Automatically sync when internet reconnects
-      if (appData?.account?.cloudSyncEnabled) {
-        triggerSync();
-      }
+      triggerSync();
     };
 
     const handleOffline = () => {
       setIsOnline(false);
     };
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine && appData?.account?.cloudSyncEnabled) {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
         triggerSync();
       }
     };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
+      if (client && channel) {
+        try {
+          client.removeChannel(channel);
+        } catch {}
+      }
+      clearInterval(pollInterval);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [appData?.account?.cloudSyncEnabled, appData]);
+  }, [
+    appData?.account?.cloudSyncEnabled,
+    appData?.account?.supabaseUrl,
+    appData?.account?.supabaseAnonKey,
+    appData?.account?.email,
+  ]);
 
   const exportBackup = () => {
     exportDataToJson(appData);

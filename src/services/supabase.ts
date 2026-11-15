@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { AppData } from '../types';
+import type { AppData, TaskTemplate, DayLog } from '../types';
 
 let cachedClient: SupabaseClient | null = null;
 let currentUrl: string | null = null;
@@ -32,12 +32,93 @@ export function getSupabaseClient(url?: string, key?: string): SupabaseClient | 
 }
 
 /**
+ * Deep merges remote AppData with local AppData safely:
+ * - Preserves tasks from both
+ * - Unites completedTaskIds and timestamps for every date
+ */
+export function mergeAppData(remote: AppData, local: AppData): AppData {
+  // Merge tasks by id
+  const taskMap = new Map<string, TaskTemplate>();
+  (remote.tasks || []).forEach((t) => taskMap.set(t.id, t));
+  (local.tasks || []).forEach((t) => taskMap.set(t.id, t));
+
+  // Merge history by date
+  const allDates = new Set([
+    ...Object.keys(remote.history || {}),
+    ...Object.keys(local.history || {}),
+  ]);
+  const mergedHistory: Record<string, DayLog> = {};
+
+  allDates.forEach((dateStr) => {
+    const rLog = remote.history?.[dateStr];
+    const lLog = local.history?.[dateStr];
+
+    if (!rLog) {
+      mergedHistory[dateStr] = lLog!;
+      return;
+    }
+    if (!lLog) {
+      mergedHistory[dateStr] = rLog;
+      return;
+    }
+
+    // Both exist: union completedTaskIds
+    const completedSet = new Set([
+      ...(rLog.completedTaskIds || []),
+      ...(lLog.completedTaskIds || []),
+    ]);
+
+    mergedHistory[dateStr] = {
+      completedTaskIds: Array.from(completedSet),
+      completedAt: { ...(rLog.completedAt || {}), ...(lLog.completedAt || {}) },
+    };
+  });
+
+  return {
+    ...local,
+    tasks: Array.from(taskMap.values()),
+    history: mergedHistory,
+  };
+}
+
+/**
+ * Fast fetch remote data from Supabase without writing
+ */
+export async function fetchFromCloud(
+  url?: string,
+  key?: string,
+  email = 'default@routine.app'
+): Promise<{ success: boolean; data?: AppData; updatedAt?: string }> {
+  const client = getSupabaseClient(url, key);
+  if (!client) return { success: false };
+
+  try {
+    const { data: remoteRecord, error } = await client
+      .from('user_routines')
+      .select('data, updated_at')
+      .eq('user_email', email)
+      .maybeSingle();
+
+    if (error) {
+      return { success: false };
+    }
+
+    if (remoteRecord && remoteRecord.data) {
+      return {
+        success: true,
+        data: remoteRecord.data as AppData,
+        updatedAt: remoteRecord.updated_at,
+      };
+    }
+    return { success: false };
+  } catch {
+    return { success: false };
+  }
+}
+
+/**
  * Cloud sync function:
- * Syncs user data with Supabase table 'user_routines':
- * table schema:
- *   user_email (text primary key)
- *   data (jsonb)
- *   updated_at (timestamp)
+ * Full bidirectional sync with merge and push
  */
 export async function syncWithCloud(
   appData: AppData,
@@ -48,7 +129,7 @@ export async function syncWithCloud(
   if (!client) {
     return {
       success: false,
-      message: 'Supabase не настроен (укажите URL и Anon Key в настройках аккаунта)',
+      message: 'Supabase не настроен (укажите URL и Anon Key в настройках)',
     };
   }
 
@@ -67,20 +148,8 @@ export async function syncWithCloud(
     }
 
     if (remoteRecord && remoteRecord.data) {
-      // Merge remote and local history
       const remoteData = remoteRecord.data as AppData;
-      const mergedHistory = { ...remoteData.history, ...appData.history };
-
-      // Tasks: prefer whichever has more recent updates, or merge by id
-      const taskMap = new Map();
-      (remoteData.tasks || []).forEach(t => taskMap.set(t.id, t));
-      (appData.tasks || []).forEach(t => taskMap.set(t.id, t));
-
-      const mergedData: AppData = {
-        ...appData,
-        tasks: Array.from(taskMap.values()),
-        history: mergedHistory,
-      };
+      const mergedData = mergeAppData(remoteData, appData);
 
       // Push merged back to Supabase
       await client.from('user_routines').upsert({
@@ -89,7 +158,11 @@ export async function syncWithCloud(
         updated_at: new Date().toISOString(),
       });
 
-      return { success: true, data: mergedData, message: 'Данные успешно синхронизированы с облаком!' };
+      return {
+        success: true,
+        data: mergedData,
+        message: 'Данные успешно синхронизированы с облаком!',
+      };
     } else {
       // No remote record yet, push current local data
       const { error: upsertError } = await client.from('user_routines').upsert({

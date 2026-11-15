@@ -145,15 +145,15 @@ export function saveStoredCategories(categories: string[]): void {
   }
 }
 
-const CURRENT_VERSION = 4;
+const CURRENT_VERSION = 5;
 const STORAGE_KEY_PREFIX = 'daily_routines_data_';
 const CURRENT_EMAIL_KEY = 'daily_routines_active_email';
 const ALL_ACCOUNTS_KEY = 'daily_routines_all_emails';
 
-// Generate complete history for Nov 1 to Nov 13, 2026, and NO tasks before Nov 2026
+// Generate complete history for Nov 1 to Nov 14, 2026, and NO tasks before Nov 2026
 export function generateNovemberHistory(tasks: TaskTemplate[]): Record<string, import('../types').DayLog> {
   const history: Record<string, import('../types').DayLog> = {};
-  for (let d = 1; d <= 13; d++) {
+  for (let d = 1; d <= 14; d++) {
     const dayStr = d < 10 ? `0${d}` : `${d}`;
     const dateStr = `2026-11-${dayStr}`;
     // In 2026, month index 10 is November. 2026-11-01 was Sunday (day 0)
@@ -255,17 +255,20 @@ export function loadAppData(email: string): AppData {
           return migrated;
         }
 
-        // Ensure Nov 1-13 completed tasks exist and October/earlier are purged
+        // Ensure Nov 1-14 completed tasks exist and October/earlier are purged
         const novHistory = generateNovemberHistory(tasks);
-        for (let d = 1; d <= 13; d++) {
+        for (let d = 1; d <= 14; d++) {
           const dStr = `2026-11-${d < 10 ? '0' + d : d}`;
           if (!cleanedHistory[dStr] || cleanedHistory[dStr].completedTaskIds.length === 0) {
             cleanedHistory[dStr] = novHistory[dStr];
           }
         }
-        // Explicitly ensure 2026-11-13 has all scheduled tasks completed as requested
+        // Explicitly ensure 2026-11-13 and 2026-11-14 have all scheduled tasks completed as requested
         if (novHistory['2026-11-13']) {
           cleanedHistory['2026-11-13'] = novHistory['2026-11-13'];
+        }
+        if (novHistory['2026-11-14']) {
+          cleanedHistory['2026-11-14'] = novHistory['2026-11-14'];
         }
 
         return {

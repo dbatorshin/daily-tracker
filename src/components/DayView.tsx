@@ -189,7 +189,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
         {isSunday && (
           <div className="mt-3.5 flex items-center gap-2 text-xs text-amber-900 font-bold bg-amber-100/60 p-3 rounded-2xl border border-amber-300/60 shadow-sm backdrop-blur-md">
             <Sun className="w-4 h-4 text-amber-600 shrink-0" />
-            <span>Воскресенье — день отдыха (рабочие дела исключены)</span>
+            <span>Воскресенье — день отдыха</span>
           </div>
         )}
       </div>
@@ -229,12 +229,12 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
 
       {/* Task Cards */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between px-2 pt-1">
-          <span className="text-xs font-black text-slate-700 uppercase tracking-wider">
+        <div className="flex items-center justify-between gap-2 px-1 sm:px-2 pt-1">
+          <span className="text-[11px] sm:text-xs font-black text-slate-700 uppercase tracking-wide whitespace-nowrap shrink-0">
             Действия на день ({activeTasks.length})
           </span>
-          <span className="text-[11px] text-slate-600 font-bold">
-            Нажмите на ячейку для настройки
+          <span className="text-[10px] sm:text-[11px] text-slate-500 font-bold whitespace-nowrap shrink-0">
+            Нажмите для настройки
           </span>
         </div>
 
@@ -360,7 +360,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 font-semibold">
-                  Выполненные сегодня (обнуляются в полночь)
+                  Выполненные сегодня
                 </p>
               </div>
             </div>
@@ -375,7 +375,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
               <div className="flex items-start gap-2 p-2.5 rounded-2xl bg-white/40 border border-white/60 text-[11px] text-slate-600 font-medium">
                 <Info className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
                 <span>
-                  Действия в корзине обнуляются в 00:00 и снова станут активными завтра.
+                  Действия в корзине снова станут активными завтра.
                 </span>
               </div>
 

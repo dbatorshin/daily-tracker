@@ -45,14 +45,9 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
           <div>
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <h1 className="text-sm sm:text-lg font-black tracking-tight text-amber-950 leading-tight">
-                Ежедневки
-              </h1>
-              <span className="text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full bg-orange-500/15 text-orange-950 border border-orange-400/30">
-                PWA
-              </span>
-            </div>
+            <h1 className="text-sm sm:text-lg font-black tracking-tight text-amber-950 leading-tight">
+              Ежедневки
+            </h1>
             <p className="text-[11px] text-amber-900/60 font-semibold hidden sm:block">
               Трекер повторяющихся действий
             </p>

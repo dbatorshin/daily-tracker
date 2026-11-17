@@ -13,6 +13,9 @@ import {
   ExternalLink,
   Lock,
   KeyRound,
+  Smartphone,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { useRoutines } from '../context/RoutineContext';
 import { haptic } from '../utils/haptics';
@@ -44,6 +47,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, onL
   const [isSyncing, setIsSyncing] = useState(false);
   const [showSupabaseHelp, setShowHelp] = useState(false);
   const [hasPinState, setHasPinState] = useState(() => isPinConfigured());
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -81,19 +85,50 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, onL
 
   const handleSaveSettings = async () => {
     haptic.light();
+    const url = supabaseUrl.trim() || undefined;
+    const key = supabaseKey.trim() || undefined;
+
     updateAccountSettings({
-      supabaseUrl: supabaseUrl.trim() || undefined,
-      supabaseAnonKey: supabaseKey.trim() || undefined,
+      supabaseUrl: url,
+      supabaseAnonKey: key,
       cloudSyncEnabled: syncEnabled,
     });
 
-    if (syncEnabled && supabaseUrl && supabaseKey) {
+    if (syncEnabled && url && key) {
       setIsSyncing(true);
       setSyncStatus('Синхронизация...');
-      const res = await triggerSync();
+      const res = await triggerSync(url, key);
       setIsSyncing(false);
       setSyncStatus(res.message || (res.success ? 'Синхронизировано!' : 'Ошибка'));
       if (res.success) haptic.success();
+    } else {
+      setSyncStatus('Настройки сохранены');
+    }
+  };
+
+  const handleCopyMobileLink = () => {
+    haptic.light();
+    const url = supabaseUrl.trim();
+    const key = supabaseKey.trim();
+    if (!url || !key) return;
+
+    const payload = {
+      u: url,
+      k: key,
+      e: appData?.account?.email || 'default@routine.app',
+    };
+    const b64 = btoa(encodeURIComponent(JSON.stringify(payload)));
+    const link = `${window.location.origin}${window.location.pathname}#sync=${b64}`;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(link).then(() => {
+        setCopiedLink(true);
+        setTimeout(() => setCopiedLink(false), 3000);
+      }).catch(() => {
+        prompt('Скопируйте эту ссылку для быстрой настройки на телефоне:', link);
+      });
+    } else {
+      prompt('Скопируйте эту ссылку для быстрой настройки на телефоне:', link);
     }
   };
 
@@ -263,10 +298,12 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, onL
                 </p>
                 <ol className="list-decimal pl-4 space-y-1 text-slate-600 font-medium">
                   <li>Зайдите на <a href="https://supabase.com" target="_blank" rel="noreferrer" className="text-teal-700 underline font-bold inline-flex items-center gap-0.5">supabase.com <ExternalLink className="w-3 h-3" /></a> и создайте бесплатный проект.</li>
-                  <li>В разделе <strong>Project Settings → API</strong> скопируйте <strong>Project URL</strong> и <strong>anon public key</strong>.</li>
-                  <li>В разделе <strong>SQL Editor</strong> выполните команду:
-                    <pre className="mt-1 p-2 bg-slate-900 text-teal-300 rounded-xl text-[10px] font-mono overflow-x-auto">
-                      create table if not exists user_routines ( user_email text primary key, data jsonb, updated_at timestamp default now() );
+                  <li>В разделе <strong>Project Settings → API</strong> скопируйте <strong>Project URL</strong> и <strong>Publishable key</strong> (или `anon public`).</li>
+                  <li>В разделе <strong>SQL Editor</strong> выполните команды:
+                    <pre className="mt-1 p-2 bg-slate-900 text-teal-300 rounded-xl text-[10px] font-mono overflow-x-auto whitespace-pre-wrap">
+create table if not exists user_routines ( user_email text primary key, data jsonb, updated_at timestamp default now() );
+alter table user_routines replica identity full;
+alter publication supabase_realtime add table user_routines;
                     </pre>
                   </li>
                   <li>Вставьте URL и ключ в поля ниже и нажмите «Сохранить».</li>
@@ -340,6 +377,30 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, onL
                   </span>
                 )}
               </div>
+
+              {/* Quick transfer button to sync Smartphone PWA/Browser in 1 second */}
+              {syncEnabled && supabaseUrl && supabaseKey && (
+                <div className="p-3.5 rounded-2xl bg-teal-50/90 border border-teal-200 text-xs space-y-2 mt-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-teal-900 flex items-center gap-1.5">
+                      <Smartphone className="w-4 h-4 text-teal-700 shrink-0" />
+                      Перенос настроек на смартфон
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyMobileLink}
+                      style={{ outline: 'none' }}
+                      className="btn-volumetric-cyan px-3 py-1 rounded-full text-white text-[11px] font-black flex items-center gap-1 outline-none cursor-pointer shrink-0"
+                    >
+                      {copiedLink ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedLink ? 'Скопировано!' : 'Скопировать ссылку'}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
+                    Отправьте эту ссылку себе (например, в Telegram) и откройте её на смартфоне в браузере или в PWA. Облако подключится мгновенно без ручного ввода ключей!
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 

@@ -12,7 +12,7 @@ import {
   saveStoredCategories,
   ensureCompleteYear2026,
 } from '../services/storage';
-import { syncWithCloud, pushToCloud, getSupabaseClient, fetchFromCloud } from '../services/supabase';
+import { syncWithCloud, pushToCloud, getSupabaseClient, fetchFromCloud, parseTimestamp } from '../services/supabase';
 
 interface RoutineContextType {
   // Navigation & Views
@@ -50,7 +50,7 @@ interface RoutineContextType {
   // Account & Sync Actions
   switchAccount: (email: string) => void;
   updateAccountSettings: (updates: Partial<UserAccount>) => void;
-  triggerSync: () => Promise<{ success: boolean; message?: string }>;
+  triggerSync: (overrideUrl?: string, overrideKey?: string) => Promise<{ success: boolean; message?: string }>;
   exportBackup: () => void;
   importBackup: (data: AppData) => void;
 
@@ -106,7 +106,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   }, [appData, activeAccountEmail]);
 
-  // Auto-push to cloud ONLY on local user mutations (Debounced 800ms)
+  // Auto-push to cloud ONLY on local user mutations (Debounced 500ms)
   useEffect(() => {
     if (!isUserMutationRef.current) return;
     if (!appData?.account?.cloudSyncEnabled || !navigator.onLine) return;
@@ -123,6 +123,9 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
         if (res.success && res.updatedAt) {
           lastPushedAtRef.current = res.updatedAt;
           lastRemoteUpdatedAtRef.current = res.updatedAt;
+          if (res.data) {
+            setAppData(res.data);
+          }
           setHasPendingSync(false);
           try {
             localStorage.removeItem('routine_pending_sync');
@@ -130,9 +133,9 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
           setLastSyncTime(new Date());
         }
       } finally {
-        setTimeout(() => setIsSyncing(false), 400);
+        setTimeout(() => setIsSyncing(false), 300);
       }
-    }, 800);
+    }, 500);
 
     return () => clearTimeout(timeout);
   }, [appData, appData?.account?.cloudSyncEnabled]);
@@ -188,8 +191,9 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   const moveToTrash = (taskId: string, targetDate = selectedDate) => {
     isUserMutationRef.current = true;
     const dateStr = format(targetDate, 'yyyy-MM-dd');
+    const now = new Date().toISOString();
     setAppData((prev) => {
-      const existingLog = prev.history[dateStr] || { completedTaskIds: [], completedAt: {} };
+      const existingLog = prev.history[dateStr] || { completedTaskIds: [], completedAt: {}, restoredAt: {} };
       if (existingLog.completedTaskIds.includes(taskId)) return prev;
 
       const newCompletedIds = [...existingLog.completedTaskIds, taskId];
@@ -205,12 +209,16 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
         animationIndex = Math.abs(hash) % 10;
       }
 
+      const newRestoredAt = { ...(existingLog.restoredAt || {}) };
+      delete newRestoredAt[taskId];
+
       const updatedLog: DayLog = {
         completedTaskIds: newCompletedIds,
         completedAt: {
           ...existingLog.completedAt,
-          [taskId]: new Date().toISOString(),
+          [taskId]: now,
         },
+        restoredAt: newRestoredAt,
         animationIndex,
       };
 
@@ -228,6 +236,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   const restoreFromTrash = (taskId: string, targetDate = selectedDate) => {
     isUserMutationRef.current = true;
     const dateStr = format(targetDate, 'yyyy-MM-dd');
+    const now = new Date().toISOString();
     setAppData((prev) => {
       const existingLog = prev.history[dateStr];
       if (!existingLog) return prev;
@@ -241,8 +250,13 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
         history: {
           ...prev.history,
           [dateStr]: {
+            ...existingLog,
             completedTaskIds: remainingIds,
             completedAt: remainingTimes,
+            restoredAt: {
+              ...(existingLog.restoredAt || {}),
+              [taskId]: now,
+            },
           },
         },
       };
@@ -308,16 +322,23 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
     }));
   };
 
-  const triggerSync = async () => {
+  const triggerSync = async (overrideUrl?: string, overrideKey?: string) => {
     if (!navigator.onLine) {
       return { success: false, message: 'Офлайн режим: все изменения сохранены локально на устройстве.' };
     }
+    const targetUrl = overrideUrl || appData?.account?.supabaseUrl;
+    const targetKey = overrideKey || appData?.account?.supabaseAnonKey;
+
+    if (!targetUrl || !targetKey) {
+      return { success: false, message: 'Параметры Supabase не заполнены' };
+    }
+
     setIsSyncing(true);
     try {
       const res = await syncWithCloud(
         appData,
-        appData?.account?.supabaseUrl,
-        appData?.account?.supabaseAnonKey
+        targetUrl,
+        targetKey
       );
       if (res.success && res.data) {
         isUserMutationRef.current = false;
@@ -334,11 +355,11 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
       }
       return res;
     } finally {
-      setTimeout(() => setIsSyncing(false), 400);
+      setTimeout(() => setIsSyncing(false), 300);
     }
   };
 
-  // Real-time synchronization: WebSocket, live polling, and visibility listeners
+  // Real-time synchronization: WebSocket, live polling, and visibility/focus listeners
   useEffect(() => {
     if (!appData?.account?.cloudSyncEnabled) return;
 
@@ -368,7 +389,9 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
               if (remoteUpdated && remoteUpdated === lastPushedAtRef.current) {
                 return;
               }
-              if (payload?.new?.data && remoteUpdated && remoteUpdated > (lastPushedAtRef.current || '')) {
+              const remoteTime = parseTimestamp(remoteUpdated);
+              const pushedTime = parseTimestamp(lastPushedAtRef.current);
+              if (payload?.new?.data && (remoteTime > pushedTime || !pushedTime)) {
                 isUserMutationRef.current = false;
                 setAppData(ensureCompleteYear2026(payload.new.data as AppData));
                 lastRemoteUpdatedAtRef.current = remoteUpdated;
@@ -382,30 +405,32 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
       }
     }
 
-    // 2. Periodic background check (every 15 seconds, ONLY if tab is active)
-    const pollInterval = setInterval(async () => {
+    const checkRemoteUpdates = async () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
         const res = await fetchFromCloud(
           appData?.account?.supabaseUrl,
           appData?.account?.supabaseAnonKey,
           email
         );
-        if (
-          res.success &&
-          res.data &&
-          res.updatedAt &&
-          res.updatedAt > (lastRemoteUpdatedAtRef.current || '') &&
-          res.updatedAt > (lastPushedAtRef.current || '')
-        ) {
-          isUserMutationRef.current = false;
-          setAppData(ensureCompleteYear2026(res.data));
-          lastRemoteUpdatedAtRef.current = res.updatedAt;
-          setLastSyncTime(new Date());
+        if (res.success && res.data && res.updatedAt) {
+          const remoteTime = parseTimestamp(res.updatedAt);
+          const lastRemoteTime = parseTimestamp(lastRemoteUpdatedAtRef.current);
+          const lastPushedTime = parseTimestamp(lastPushedAtRef.current);
+
+          if (remoteTime > lastRemoteTime && remoteTime > lastPushedTime) {
+            isUserMutationRef.current = false;
+            setAppData(ensureCompleteYear2026(res.data));
+            lastRemoteUpdatedAtRef.current = res.updatedAt;
+            setLastSyncTime(new Date());
+          }
         }
       }
-    }, 15000);
+    };
 
-    // 3. Online and visibilitychange listeners
+    // 2. High-frequency live polling (every 3.5 seconds when active)
+    const pollInterval = setInterval(checkRemoteUpdates, 3500);
+
+    // 3. Online, visibilitychange, and focus listeners
     const handleOnline = () => {
       setIsOnline(true);
       triggerSync();
@@ -415,31 +440,10 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
       setIsOnline(false);
     };
 
-    const handleVisibility = async () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) {
-        const res = await fetchFromCloud(
-          appData?.account?.supabaseUrl,
-          appData?.account?.supabaseAnonKey,
-          email
-        );
-        if (
-          res.success &&
-          res.data &&
-          res.updatedAt &&
-          res.updatedAt > (lastRemoteUpdatedAtRef.current || '') &&
-          res.updatedAt > (lastPushedAtRef.current || '')
-        ) {
-          isUserMutationRef.current = false;
-          setAppData(ensureCompleteYear2026(res.data));
-          lastRemoteUpdatedAtRef.current = res.updatedAt;
-          setLastSyncTime(new Date());
-        }
-      }
-    };
-
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', checkRemoteUpdates);
+    document.addEventListener('visibilitychange', checkRemoteUpdates);
 
     return () => {
       if (client && channel) {
@@ -450,7 +454,8 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
       clearInterval(pollInterval);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', checkRemoteUpdates);
+      document.removeEventListener('visibilitychange', checkRemoteUpdates);
     };
   }, [
     appData?.account?.cloudSyncEnabled,
@@ -458,6 +463,37 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
     appData?.account?.supabaseAnonKey,
     appData?.account?.email,
   ]);
+
+  // 1-Click Sync Setup Link listener (e.g. sent from desktop to smartphone)
+  useEffect(() => {
+    try {
+      const hash = window.location.hash;
+      if (hash && (hash.includes('sync=') || hash.includes('sync_setup='))) {
+        const match = hash.match(/(?:sync|sync_setup)=([^&]+)/);
+        if (match && match[1]) {
+          const jsonStr = decodeURIComponent(atob(decodeURIComponent(match[1])));
+          const cfg = JSON.parse(jsonStr);
+          if (cfg && cfg.u && cfg.k) {
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            const targetUrl = cfg.u.trim();
+            const targetKey = cfg.k.trim();
+            const targetEmail = (cfg.e || activeAccountEmail).trim();
+            updateAccountSettings({
+              supabaseUrl: targetUrl,
+              supabaseAnonKey: targetKey,
+              cloudSyncEnabled: true,
+              email: targetEmail,
+            });
+            setTimeout(() => {
+              triggerSync(targetUrl, targetKey);
+            }, 100);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not parse sync setup hash from URL:', e);
+    }
+  }, []);
 
   // Startup sync: if cloud sync is enabled, sync version 6 complete year data to cloud on mount
   const startupSyncDoneRef = useRef(false);

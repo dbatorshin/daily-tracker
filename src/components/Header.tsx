@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, CloudOff, RefreshCw, User, Plus } from 'lucide-react';
+import { CheckCircle2, CloudOff, Cloud, RefreshCw, User, Plus } from 'lucide-react';
 import { useRoutines } from '../context/RoutineContext';
 import { haptic } from '../utils/haptics';
 
@@ -26,12 +26,21 @@ export const Header: React.FC<HeaderProps> = ({
   const [syncing, setSyncing] = React.useState(false);
 
   const containerMaxWidth = viewMode === 'day' ? 'max-w-3xl' : 'max-w-5xl';
+  const isCloudConfigured = Boolean(
+    appData?.account?.cloudSyncEnabled &&
+    appData?.account?.supabaseUrl &&
+    appData?.account?.supabaseAnonKey
+  );
 
   const handleSync = async () => {
     haptic.light();
+    if (!isCloudConfigured) {
+      onOpenAccount();
+      return;
+    }
     setSyncing(true);
     await triggerSync();
-    setTimeout(() => setSyncing(false), 600);
+    setTimeout(() => setSyncing(false), 500);
   };
 
   return (
@@ -66,30 +75,40 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             disabled={isSyncing || syncing}
             style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}
-            className="btn-volumetric-glass w-9 h-9 sm:w-10 sm:h-10 rounded-full relative flex items-center justify-center p-0 text-slate-700 outline-none shrink-0 cursor-pointer"
+            className={`btn-volumetric-glass w-9 h-9 sm:w-10 sm:h-10 rounded-full relative flex items-center justify-center p-0 outline-none shrink-0 cursor-pointer ${
+              !isCloudConfigured ? 'border-amber-300/80 bg-amber-50/60' : ''
+            }`}
             title={
               !isOnline
                 ? 'Офлайн: интернет отключён. Приложение полностью работает автономно'
                 : isSyncing || syncing
-                ? 'Синхронизация данных...'
-                : appData?.account?.cloudSyncEnabled
+                ? 'Синхронизация с облаком...'
+                : isCloudConfigured
                 ? hasPendingSync
-                  ? 'В сети (есть локальные изменения для отправки)'
-                  : 'В сети (облако синхронизировано)'
-                : 'В сети (работает локально в браузере)'
+                  ? 'Облако активно (отправка изменений...)'
+                  : 'Облако синхронизировано (нажмите для проверки)'
+                : 'Облако НЕ подключено на этом устройстве — нажмите для настройки'
             }
           >
             {!isOnline ? (
               <CloudOff className="w-4 h-4 sm:w-5 sm:h-5 text-slate-400" />
             ) : isSyncing || syncing ? (
               <RefreshCw className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600 animate-spin" />
-            ) : (
+            ) : isCloudConfigured ? (
               <div className="relative flex items-center justify-center">
-                <RefreshCw className={`w-4 h-4 sm:w-5 sm:h-5 text-slate-600 transition-transform ${syncing ? 'animate-spin' : ''}`} />
-                {/* Active Online Indicator (Green dot) */}
+                <Cloud className="w-4 h-4 sm:w-5 sm:h-5 text-teal-700" />
+                {/* Active Synced Indicator (Green dot) */}
                 <span className="absolute -top-1 -right-1 flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.9)]"></span>
+                </span>
+              </div>
+            ) : (
+              <div className="relative flex items-center justify-center">
+                <CloudOff className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600/80" />
+                {/* Warning dot: Not connected to cloud */}
+                <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500 shadow-[0_0_6px_rgba(245,158,11,0.9)]"></span>
                 </span>
               </div>
             )}
@@ -105,10 +124,15 @@ export const Header: React.FC<HeaderProps> = ({
               onOpenAccount();
             }}
             style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}
-            className="btn-volumetric-glass w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center p-0 text-slate-700 outline-none shrink-0 cursor-pointer"
-            title={`Управление аккаунтом (${activeAccountEmail || 'default'})`}
+            className="btn-volumetric-glass w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center p-0 text-slate-700 outline-none shrink-0 cursor-pointer relative"
+            title={`Управление аккаунтом и синхронизацией (${activeAccountEmail || 'default'})`}
           >
             <User className="w-4 h-4 sm:w-5 sm:h-5 text-slate-700" />
+            {!isCloudConfigured && (
+              <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500 border border-white"></span>
+              </span>
+            )}
           </button>
 
           {/* Add Task Button with Volumetric 3D Orange (3D Circle) */}

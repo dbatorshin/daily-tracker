@@ -32,8 +32,14 @@ export function getSupabaseClient(url?: string, key?: string): SupabaseClient | 
   }
 }
 
+export function parseTimestamp(ts?: string | null): number {
+  if (!ts) return 0;
+  const time = new Date(ts).getTime();
+  return isNaN(time) ? 0 : time;
+}
+
 /**
- * One-time safe merge for initial account connection
+ * Safe Conflict-Free (LWW) merge of remote and local application state
  */
 export function mergeAppData(remote: AppData, local: AppData): AppData {
   const taskMap = new Map<string, TaskTemplate>();
@@ -59,16 +65,52 @@ export function mergeAppData(remote: AppData, local: AppData): AppData {
       return;
     }
 
-    // Prefer local completedTaskIds if local has records for this day
-    const completedSet = new Set(
-      lLog.completedTaskIds?.length
-        ? lLog.completedTaskIds
-        : rLog.completedTaskIds || []
-    );
+    // Collect all task IDs ever modified for this date
+    const allTaskIds = new Set([
+      ...(rLog.completedTaskIds || []),
+      ...(lLog.completedTaskIds || []),
+      ...Object.keys(rLog.completedAt || {}),
+      ...Object.keys(lLog.completedAt || {}),
+      ...Object.keys(rLog.restoredAt || {}),
+      ...Object.keys(lLog.restoredAt || {}),
+    ]);
+
+    const mergedCompletedIds: string[] = [];
+    const mergedCompletedAt: Record<string, string> = {};
+    const mergedRestoredAt: Record<string, string> = {};
+
+    allTaskIds.forEach((taskId) => {
+      const rComp = parseTimestamp(rLog.completedAt?.[taskId]);
+      const lComp = parseTimestamp(lLog.completedAt?.[taskId]);
+      const maxComp = Math.max(rComp, lComp);
+
+      const rRest = parseTimestamp(rLog.restoredAt?.[taskId]);
+      const lRest = parseTimestamp(lLog.restoredAt?.[taskId]);
+      const maxRest = Math.max(rRest, lRest);
+
+      const hasLegacyComp =
+        maxComp === 0 &&
+        ((rLog.completedTaskIds || []).includes(taskId) ||
+         (lLog.completedTaskIds || []).includes(taskId));
+
+      if (maxComp > maxRest || (hasLegacyComp && maxRest === 0)) {
+        mergedCompletedIds.push(taskId);
+        const compDateStr =
+          (rComp >= lComp ? rLog.completedAt?.[taskId] : lLog.completedAt?.[taskId]) ||
+          new Date().toISOString();
+        mergedCompletedAt[taskId] = compDateStr;
+      } else if (maxRest > 0) {
+        const restDateStr =
+          (rRest >= lRest ? rLog.restoredAt?.[taskId] : lLog.restoredAt?.[taskId]) ||
+          new Date().toISOString();
+        mergedRestoredAt[taskId] = restDateStr;
+      }
+    });
 
     mergedHistory[dateStr] = {
-      completedTaskIds: Array.from(completedSet),
-      completedAt: { ...(rLog.completedAt || {}), ...(lLog.completedAt || {}) },
+      completedTaskIds: mergedCompletedIds,
+      completedAt: mergedCompletedAt,
+      restoredAt: mergedRestoredAt,
       animationIndex: lLog.animationIndex ?? rLog.animationIndex,
     };
   });
@@ -81,13 +123,13 @@ export function mergeAppData(remote: AppData, local: AppData): AppData {
 }
 
 /**
- * Push local data to Supabase (Called when user mutates data locally)
+ * Push local data to Supabase with automatic merge to prevent overwriting other devices
  */
 export async function pushToCloud(
   appData: AppData,
   url?: string,
   key?: string
-): Promise<{ success: boolean; updatedAt?: string; message?: string }> {
+): Promise<{ success: boolean; data?: AppData; updatedAt?: string; message?: string }> {
   const client = getSupabaseClient(url, key);
   if (!client) return { success: false, message: 'Supabase не настроен' };
 
@@ -95,9 +137,21 @@ export async function pushToCloud(
   const now = new Date().toISOString();
 
   try {
+    // 1. Fetch remote record to merge concurrent updates from other devices
+    const { data: remoteRecord } = await client
+      .from('user_routines')
+      .select('data, updated_at')
+      .eq('user_email', email)
+      .maybeSingle();
+
+    let dataToPush = appData;
+    if (remoteRecord && remoteRecord.data) {
+      dataToPush = mergeAppData(remoteRecord.data as AppData, appData);
+    }
+
     const { error } = await client.from('user_routines').upsert({
       user_email: email,
-      data: appData,
+      data: dataToPush,
       updated_at: now,
     });
 
@@ -105,7 +159,7 @@ export async function pushToCloud(
       console.warn('Push error to Supabase:', error);
       return { success: false, message: error.message };
     }
-    return { success: true, updatedAt: now };
+    return { success: true, data: dataToPush, updatedAt: now };
   } catch (err: any) {
     return { success: false, message: err?.message || 'Ошибка отправки' };
   }

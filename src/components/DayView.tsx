@@ -63,7 +63,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
   } = useRoutines();
 
   const [isTrashOpen, setIsTrashOpen] = useState(false);
-  const [justCompletedId, setJustCompletedId] = useState<string | null>(null);
+  const [completingTaskIds, setCompletingTaskIds] = useState<string[]>([]);
 
   const isCurrentToday = isToday(selectedDate);
   const isSunday = selectedDate.getDay() === 0;
@@ -107,11 +107,12 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
   }, [dayCompletionRate, totalScheduledToday]);
 
   const handleCheckTask = (task: TaskTemplate) => {
+    if (completingTaskIds.includes(task.id)) return;
     haptic.success();
-    setJustCompletedId(task.id);
+    setCompletingTaskIds((prev) => (prev.includes(task.id) ? prev : [...prev, task.id]));
     setTimeout(() => {
       moveToTrash(task.id);
-      setJustCompletedId(null);
+      setCompletingTaskIds((prev) => prev.filter((id) => id !== task.id));
     }, 380);
   };
 
@@ -278,7 +279,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
         ) : (
           <div className="space-y-3">
             {activeTasks.map((task) => {
-              const isChecking = justCompletedId === task.id;
+              const isChecking = completingTaskIds.includes(task.id);
               const cardClass = isSaturday ? 'task-card-saturday' : 'task-card';
 
               return (
@@ -289,7 +290,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                     onEditTask(task);
                   }}
                   className={`${cardClass} flex items-center justify-between gap-3.5 cursor-pointer active:scale-[0.99]${
-                    isChecking ? ' animate-task-disappear' : ''
+                    isChecking ? ' animate-task-disappear pointer-events-none' : ''
                   }`}
                   title="Нажмите на карточку для настройки действия"
                 >
@@ -321,11 +322,13 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                   {/* Right: Complete button */}
                   <div className="flex items-center gap-2 shrink-0">
                     <button
+                      disabled={isChecking}
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (isChecking) return;
                         handleCheckTask(task);
                       }}
-                      className="btn-volumetric-cyan px-4 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center gap-2 text-xs font-extrabold shadow-md tracking-tight active:scale-95"
+                      className="btn-volumetric-cyan px-4 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center gap-2 text-xs font-extrabold shadow-md tracking-tight active:scale-95 disabled:opacity-80"
                       title="Выполнить (убрать в корзину дня)"
                     >
                       {isChecking ? (

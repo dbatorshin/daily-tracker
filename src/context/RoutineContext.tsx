@@ -88,8 +88,14 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   // Sync state tracking refs to prevent loops and double-syncing
   const isUserMutationRef = useRef<boolean>(false);
+  const mutationCounterRef = useRef<number>(0);
+  const latestAppDataRef = useRef<AppData>(appData);
   const lastPushedAtRef = useRef<string>('');
   const lastRemoteUpdatedAtRef = useRef<string>('');
+
+  useEffect(() => {
+    latestAppDataRef.current = appData;
+  }, [appData]);
 
   const markPendingSync = () => {
     setHasPendingSync(true);
@@ -111,20 +117,26 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (!isUserMutationRef.current) return;
     if (!appData?.account?.cloudSyncEnabled || !navigator.onLine) return;
 
+    const mutationId = mutationCounterRef.current;
+
     const timeout = setTimeout(async () => {
-      isUserMutationRef.current = false;
       setIsSyncing(true);
       try {
+        const currentData = latestAppDataRef.current;
         const res = await pushToCloud(
-          appData,
-          appData?.account?.supabaseUrl,
-          appData?.account?.supabaseAnonKey
+          currentData,
+          currentData?.account?.supabaseUrl,
+          currentData?.account?.supabaseAnonKey
         );
         if (res.success && res.updatedAt) {
           lastPushedAtRef.current = res.updatedAt;
           lastRemoteUpdatedAtRef.current = res.updatedAt;
-          if (res.data) {
-            setAppData(res.data);
+          // Only update state if no newer mutations occurred while push was in flight
+          if (mutationCounterRef.current === mutationId) {
+            isUserMutationRef.current = false;
+            if (res.data) {
+              setAppData(res.data);
+            }
           }
           setHasPendingSync(false);
           try {
@@ -190,6 +202,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   // Move task to trash for the specified date (defaults to selectedDate)
   const moveToTrash = (taskId: string, targetDate = selectedDate) => {
     isUserMutationRef.current = true;
+    mutationCounterRef.current++;
     const dateStr = format(targetDate, 'yyyy-MM-dd');
     const now = new Date().toISOString();
     setAppData((prev) => {
@@ -235,6 +248,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   // Restore task from trash back to active list for today
   const restoreFromTrash = (taskId: string, targetDate = selectedDate) => {
     isUserMutationRef.current = true;
+    mutationCounterRef.current++;
     const dateStr = format(targetDate, 'yyyy-MM-dd');
     const now = new Date().toISOString();
     setAppData((prev) => {
@@ -406,6 +420,8 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
 
     const checkRemoteUpdates = async () => {
+      // Do not poll or overwrite local state while user has unsaved mutations
+      if (isUserMutationRef.current) return;
       if (document.visibilityState === 'visible' && navigator.onLine) {
         const res = await fetchFromCloud(
           appData?.account?.supabaseUrl,
@@ -413,12 +429,14 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
           email
         );
         if (res.success && res.data && res.updatedAt) {
+          // Double check mutation flag in case user interacted while fetch was in flight
+          if (isUserMutationRef.current) return;
+
           const remoteTime = parseTimestamp(res.updatedAt);
           const lastRemoteTime = parseTimestamp(lastRemoteUpdatedAtRef.current);
           const lastPushedTime = parseTimestamp(lastPushedAtRef.current);
 
           if (remoteTime > lastRemoteTime && remoteTime > lastPushedTime) {
-            isUserMutationRef.current = false;
             setAppData(ensureCompleteYear2026(res.data));
             lastRemoteUpdatedAtRef.current = res.updatedAt;
             setLastSyncTime(new Date());

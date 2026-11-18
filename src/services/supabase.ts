@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { AppData, TaskTemplate, DayLog } from '../types';
-import { ensureCompleteYear2026 } from './storage';
+import { ensureCompleteYear2026, getStoredCategories } from './storage';
 
 let cachedClient: SupabaseClient | null = null;
 let currentUrl: string | null = null;
@@ -42,10 +42,43 @@ export function parseTimestamp(ts?: string | null): number {
  * Safe Conflict-Free (LWW) merge of remote and local application state
  */
 export function mergeAppData(remote: AppData, local: AppData): AppData {
-  const taskMap = new Map<string, TaskTemplate>();
-  (remote.tasks || []).forEach((t) => taskMap.set(t.id, t));
-  (local.tasks || []).forEach((t) => taskMap.set(t.id, t));
+  // 1. Tombstone union: any task or category deleted on ANY device stays deleted
+  const allDeletedTaskIds = new Set([
+    ...(remote.deletedTaskIds || []),
+    ...(local.deletedTaskIds || []),
+  ]);
 
+  const allDeletedCats = new Set([
+    ...(remote.deletedCategories || []),
+    ...(local.deletedCategories || []),
+  ]);
+
+  // 2. Merge tasks: include only non-deleted tasks
+  const taskMap = new Map<string, TaskTemplate>();
+  (remote.tasks || []).forEach((t) => {
+    if (!allDeletedTaskIds.has(t.id)) {
+      taskMap.set(t.id, t);
+    }
+  });
+  (local.tasks || []).forEach((t) => {
+    if (!allDeletedTaskIds.has(t.id)) {
+      taskMap.set(t.id, t);
+    }
+  });
+
+  // 3. Merge categories: union, preserving order, removing deleted categories
+  const localCats = Array.isArray(local.categories) ? local.categories : getStoredCategories();
+  const remoteCats = Array.isArray(remote.categories) ? remote.categories : [];
+  const mergedCatsSet = new Set<string>();
+  localCats.forEach((c) => {
+    if (!allDeletedCats.has(c)) mergedCatsSet.add(c);
+  });
+  remoteCats.forEach((c) => {
+    if (!allDeletedCats.has(c)) mergedCatsSet.add(c);
+  });
+  const mergedCategories = Array.from(mergedCatsSet);
+
+  // 4. Merge day completion history (LWW timestamp conflict resolution)
   const allDates = new Set([
     ...Object.keys(remote.history || {}),
     ...Object.keys(local.history || {}),
@@ -80,6 +113,9 @@ export function mergeAppData(remote: AppData, local: AppData): AppData {
     const mergedRestoredAt: Record<string, string> = {};
 
     allTaskIds.forEach((taskId) => {
+      // Do not retain history for deleted tasks
+      if (allDeletedTaskIds.has(taskId)) return;
+
       const rComp = parseTimestamp(rLog.completedAt?.[taskId]);
       const lComp = parseTimestamp(lLog.completedAt?.[taskId]);
       const maxComp = Math.max(rComp, lComp);
@@ -118,6 +154,9 @@ export function mergeAppData(remote: AppData, local: AppData): AppData {
   return ensureCompleteYear2026({
     ...local,
     tasks: Array.from(taskMap.values()),
+    deletedTaskIds: Array.from(allDeletedTaskIds),
+    categories: mergedCategories,
+    deletedCategories: Array.from(allDeletedCats),
     history: mergedHistory,
   });
 }

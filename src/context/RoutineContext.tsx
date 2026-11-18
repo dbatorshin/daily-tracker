@@ -280,6 +280,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   // Create new task template
   const createTask = (newTaskData: Omit<TaskTemplate, 'id' | 'createdAt' | 'order'>) => {
     isUserMutationRef.current = true;
+    mutationCounterRef.current++;
     const newTask: TaskTemplate = {
       ...newTaskData,
       id: 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -295,6 +296,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   // Update existing task template
   const updateTask = (id: string, updates: Partial<TaskTemplate>) => {
     isUserMutationRef.current = true;
+    mutationCounterRef.current++;
     setAppData((prev) => ({
       ...prev,
       tasks: prev.tasks.map((task) => (task.id === id ? { ...task, ...updates } : task)),
@@ -304,14 +306,43 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   // Delete task template permanently (from template list completely)
   const deleteTaskPermanently = (id: string) => {
     isUserMutationRef.current = true;
-    setAppData((prev) => ({
-      ...prev,
-      tasks: prev.tasks.filter((task) => task.id !== id),
-    }));
+    mutationCounterRef.current++;
+    setAppData((prev) => {
+      const updatedDeleted = Array.from(new Set([...(prev.deletedTaskIds || []), id]));
+      const updatedTasks = prev.tasks.filter((task) => task.id !== id);
+
+      // Clean up deleted taskId from day logs
+      const updatedHistory: Record<string, DayLog> = {};
+      for (const [dateStr, log] of Object.entries(prev.history || {})) {
+        if (log.completedTaskIds?.includes(id) || log.completedAt?.[id] || log.restoredAt?.[id]) {
+          const compIds = log.completedTaskIds?.filter((tId) => tId !== id) || [];
+          const compAt = { ...(log.completedAt || {}) };
+          delete compAt[id];
+          const restAt = { ...(log.restoredAt || {}) };
+          delete restAt[id];
+          updatedHistory[dateStr] = {
+            ...log,
+            completedTaskIds: compIds,
+            completedAt: compAt,
+            restoredAt: restAt,
+          };
+        } else {
+          updatedHistory[dateStr] = log;
+        }
+      }
+
+      return {
+        ...prev,
+        tasks: updatedTasks,
+        deletedTaskIds: updatedDeleted,
+        history: updatedHistory,
+      };
+    });
   };
 
   const reorderTasks = (newTasks: TaskTemplate[]) => {
     isUserMutationRef.current = true;
+    mutationCounterRef.current++;
     setAppData((prev) => ({
       ...prev,
       tasks: newTasks.map((t, idx) => ({ ...t, order: idx + 1 })),
@@ -398,6 +429,7 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
               filter: `user_email=eq.${email}`,
             },
             (payload: any) => {
+              if (isUserMutationRef.current) return;
               const remoteUpdated = payload?.new?.updated_at;
               // Ignore if it's our own update echoing back
               if (remoteUpdated && remoteUpdated === lastPushedAtRef.current) {
@@ -534,33 +566,65 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   };
 
-  const [categories, setCategories] = useState<string[]>(() => getStoredCategories());
+  // Synchronized categories from appData
+  const categories = useMemo(() => {
+    if (Array.isArray(appData.categories) && appData.categories.length > 0) {
+      return appData.categories;
+    }
+    return getStoredCategories();
+  }, [appData.categories]);
+
+  useEffect(() => {
+    if (Array.isArray(appData.categories) && appData.categories.length > 0) {
+      saveStoredCategories(appData.categories);
+    }
+  }, [appData.categories]);
 
   const addCategory = (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    setCategories((prev) => {
-      if (prev.includes(trimmed)) return prev;
-      const updated = [...prev, trimmed];
-      saveStoredCategories(updated);
-      return updated;
+    isUserMutationRef.current = true;
+    mutationCounterRef.current++;
+    setAppData((prev) => {
+      const currentCats = Array.isArray(prev.categories) && prev.categories.length > 0
+        ? prev.categories
+        : getStoredCategories();
+      const updatedCats = currentCats.includes(trimmed) ? currentCats : [...currentCats, trimmed];
+      const updatedDeleted = (prev.deletedCategories || []).filter((c) => c !== trimmed);
+      saveStoredCategories(updatedCats);
+      return {
+        ...prev,
+        categories: updatedCats,
+        deletedCategories: updatedDeleted,
+      };
     });
   };
 
   const deleteCategory = (cat: string) => {
-    setCategories((prev) => {
-      const updated = prev.filter((c) => c !== cat);
-      saveStoredCategories(updated);
-      return updated;
-    });
-    // If deleted category was used in any tasks, those tasks now have category: undefined
+    const trimmed = cat.trim();
+    if (!trimmed) return;
     isUserMutationRef.current = true;
-    setAppData((prev) => ({
-      ...prev,
-      tasks: prev.tasks.map((task) =>
-        task.category === cat ? { ...task, category: undefined } : task
-      ),
-    }));
+    mutationCounterRef.current++;
+    setAppData((prev) => {
+      const currentCats = Array.isArray(prev.categories) && prev.categories.length > 0
+        ? prev.categories
+        : getStoredCategories();
+      const updatedCats = currentCats.filter((c) => c !== trimmed);
+      const updatedDeleted = Array.from(new Set([...(prev.deletedCategories || []), trimmed]));
+      saveStoredCategories(updatedCats);
+
+      // Unassign this category from any tasks using it
+      const updatedTasks = prev.tasks.map((task) =>
+        task.category === trimmed ? { ...task, category: undefined } : task
+      );
+
+      return {
+        ...prev,
+        tasks: updatedTasks,
+        categories: updatedCats,
+        deletedCategories: updatedDeleted,
+      };
+    });
   };
 
   const goToToday = () => {

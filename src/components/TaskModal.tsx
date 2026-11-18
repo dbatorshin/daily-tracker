@@ -49,6 +49,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [color, setColor] = useState('#2563eb');
   const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>([1, 2, 3, 4, 5, 6]);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmDeleteCat, setConfirmDeleteCat] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
   const newCatInputRef = useRef<HTMLInputElement>(null);
 
@@ -68,12 +69,14 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       setColor(taskToEdit.color || '#2563eb');
       setDaysOfWeek(taskToEdit.daysOfWeek || [1, 2, 3, 4, 5, 6]);
       setConfirmDelete(false);
+      setConfirmDeleteCat(false);
     } else {
       setTitle('');
       setCategory('Здоровье');
       setColor('#2563eb');
       setDaysOfWeek([1, 2, 3, 4, 5, 6]);
       setConfirmDelete(false);
+      setConfirmDeleteCat(false);
     }
   }, [taskToEdit, isOpen]);
 
@@ -133,9 +136,15 @@ export const TaskModal: React.FC<TaskModalProps> = ({
 
   const handleDeleteActiveCategory = () => {
     if (!category) return;
-    haptic.medium();
+    if (!confirmDeleteCat) {
+      haptic.medium();
+      setConfirmDeleteCat(true);
+      return;
+    }
+    haptic.celebrate();
     deleteCategory(category);
     setCategory('');
+    setConfirmDeleteCat(false);
   };
 
   const handleAddCategory = () => {
@@ -214,6 +223,7 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                       }}
                       onClick={() => {
                         haptic.light();
+                        setConfirmDeleteCat(false);
                         // Clicking an active category toggles it off (leaves task without category)
                         setCategory(category === cat ? '' : cat);
                       }}
@@ -233,21 +243,45 @@ export const TaskModal: React.FC<TaskModalProps> = ({
 
               {/* Category creation / deletion toolbar UNDER created categories */}
               <div className="flex items-center gap-2 pt-0.5">
-                {/* Left: - button to delete active category */}
-                <button
-                  type="button"
-                  onClick={handleDeleteActiveCategory}
-                  disabled={!category}
-                  style={{ outline: 'none' }}
-                  className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition ${
-                    category
-                      ? 'btn-volumetric-glass text-rose-600 hover:bg-rose-50 hover:text-rose-700 cursor-pointer'
-                      : 'bg-stone-100 border border-stone-200 text-stone-300 cursor-not-allowed opacity-50'
-                  }`}
-                  title={category ? `Удалить категорию «${category}»` : 'Выберите категорию для удаления'}
-                >
-                  <Minus className="w-4 h-4 stroke-[2.8]" />
-                </button>
+                {/* Left: - button to delete active category with confirmation */}
+                {confirmDeleteCat && category ? (
+                  <div className="flex items-center gap-1.5 shrink-0 animate-in fade-in">
+                    <button
+                      type="button"
+                      onClick={handleDeleteActiveCategory}
+                      style={{ outline: 'none' }}
+                      className="px-2.5 py-1 text-[11px] font-black rounded-full bg-rose-600 text-white flex items-center gap-1 shadow hover:bg-rose-700 outline-none"
+                      title={`Подтвердить удаление категории «${category}»`}
+                    >
+                      <Trash2 className="w-3 h-3 stroke-[2.5]" />
+                      <span>Удалить «{category}»</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteCat(false)}
+                      style={{ outline: 'none' }}
+                      className="btn-volumetric-glass w-7 h-7 rounded-full flex items-center justify-center text-slate-500 outline-none"
+                      title="Отмена"
+                    >
+                      <X className="w-3.5 h-3.5 stroke-[2.5]" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleDeleteActiveCategory}
+                    disabled={!category}
+                    style={{ outline: 'none' }}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition ${
+                      category
+                        ? 'btn-volumetric-glass text-rose-600 hover:bg-rose-50 hover:text-rose-700 cursor-pointer'
+                        : 'bg-stone-100 border border-stone-200 text-stone-300 cursor-not-allowed opacity-50'
+                    }`}
+                    title={category ? `Удалить категорию «${category}»` : 'Выберите категорию для удаления'}
+                  >
+                    <Minus className="w-4 h-4 stroke-[2.8]" />
+                  </button>
+                )}
 
                 {/* Input for new category */}
                 <input

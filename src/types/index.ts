@@ -34,5 +34,8 @@ export interface AppData {
   version: number;
   account: UserAccount;
   tasks: TaskTemplate[];
+  deletedTaskIds?: string[]; // IDs of permanently deleted tasks (prevents resurrection in sync)
+  categories?: string[]; // Synced list of categories across all devices
+  deletedCategories?: string[]; // Permanently deleted category names (prevents resurrection in sync)
   history: Record<string, DayLog>; // YYYY-MM-DD -> DayLog
 }

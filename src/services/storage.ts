@@ -197,7 +197,16 @@ export function generateNovemberHistory(tasks: TaskTemplate[]): Record<string, i
  * Purges obsolete pre-2026 dates.
  */
 export function ensureCompleteYear2026(data: AppData): AppData {
-  const tasks = data.tasks && data.tasks.length > 0 ? data.tasks : DEFAULT_TASKS;
+  const deletedSet = new Set(data.deletedTaskIds || []);
+  const baseTasks = Array.isArray(data.tasks) ? data.tasks : DEFAULT_TASKS;
+  const tasks = baseTasks.filter((t) => !deletedSet.has(t.id));
+
+  const deletedCats = new Set(data.deletedCategories || []);
+  const baseCats = Array.isArray(data.categories)
+    ? data.categories
+    : getStoredCategories();
+  const categories = baseCats.filter((c) => !deletedCats.has(c));
+
   const rawHistory = data.history || {};
   const yearHistory = generateYear2026History(tasks);
 
@@ -218,6 +227,9 @@ export function ensureCompleteYear2026(data: AppData): AppData {
     ...data,
     version: CURRENT_VERSION,
     tasks,
+    deletedTaskIds: Array.from(deletedSet),
+    categories,
+    deletedCategories: Array.from(deletedCats),
     history: cleanedHistory,
   };
 }
@@ -296,6 +308,7 @@ export function loadAppData(email: string): AppData {
     version: CURRENT_VERSION,
     account: getDefaultAccount(email),
     tasks: DEFAULT_TASKS,
+    categories: getStoredCategories(),
     history: initialHistory,
   };
   saveAppData(email, initialData);

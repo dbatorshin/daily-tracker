@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   ChevronLeft,
   ChevronRight,
@@ -106,14 +106,29 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
     }
   }, [dayCompletionRate, totalScheduledToday]);
 
+  const timeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  useEffect(() => {
+    return () => {
+      timeoutsRef.current.forEach(clearTimeout);
+      timeoutsRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    setCompletingTaskIds([]);
+  }, [selectedDateStr]);
+
   const handleCheckTask = (task: TaskTemplate) => {
     if (completingTaskIds.includes(task.id)) return;
     haptic.success();
     setCompletingTaskIds((prev) => (prev.includes(task.id) ? prev : [...prev, task.id]));
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       moveToTrash(task.id);
       setCompletingTaskIds((prev) => prev.filter((id) => id !== task.id));
-    }, 380);
+      timeoutsRef.current.delete(timer);
+    }, 340);
+    timeoutsRef.current.add(timer);
   };
 
   const handleRestoreTask = (task: TaskTemplate) => {
@@ -277,7 +292,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
             />
           )
         ) : (
-          <div className="space-y-3">
+          <div className="flex flex-col">
             {activeTasks.map((task) => {
               const isChecking = completingTaskIds.includes(task.id);
               const cardClass = isSaturday ? 'task-card-saturday' : 'task-card';
@@ -285,61 +300,71 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
               return (
                 <div
                   key={task.id}
-                  onClick={() => {
-                    haptic.light();
-                    onEditTask(task);
-                  }}
-                  className={`${cardClass} flex items-center justify-between gap-3.5 cursor-pointer active:scale-[0.99]${
-                    isChecking ? ' animate-task-disappear pointer-events-none' : ''
-                  }`}
-                  title="Нажмите на карточку для настройки действия"
+                  className={`task-row-container ${isChecking ? 'is-completing' : ''}`}
                 >
-                  {/* Left: Icon + Info */}
-                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                    <div className="w-11 h-11 rounded-2xl bg-white/70 border border-white/80 shadow-[0_4px_12px_rgba(15,118,110,0.06),inset_0_1px_1px_#ffffff] flex items-center justify-center shrink-0">
-                      {getTaskIcon(task)}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <h4 className="text-base font-black text-slate-800 truncate tracking-tight">
-                        {task.title}
-                      </h4>
-                      {task.category && (
-                        <div className="mt-1 flex items-center gap-1.5">
-                          {/* Category dot using task.color — only dot, not card background */}
-                          <span
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: task.color || '#14b8a6' }}
-                          />
-                          <span className="text-[10px] font-extrabold text-teal-900 bg-teal-500/15 px-2.5 py-0.5 rounded-full border border-teal-400/30">
-                            {task.category}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Right: Complete button */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      disabled={isChecking}
-                      onClick={(e) => {
-                        e.stopPropagation();
+                  <div className="task-row-content">
+                    <div
+                      onClick={() => {
                         if (isChecking) return;
-                        handleCheckTask(task);
+                        haptic.light();
+                        onEditTask(task);
                       }}
-                      className="btn-volumetric-cyan px-4 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center gap-2 text-xs font-extrabold shadow-md tracking-tight active:scale-95 disabled:opacity-80"
-                      title="Выполнить (убрать в корзину дня)"
+                      className={`${cardClass} flex items-center justify-between gap-3.5 cursor-pointer active:scale-[0.99] select-none`}
+                      title="Нажмите на карточку для настройки действия"
                     >
-                      {isChecking ? (
-                        <Check className="w-4 h-4 stroke-[3] animate-check-spring text-white" />
-                      ) : (
-                        <>
-                          <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
-                          <span className="text-white">Выполнить</span>
-                        </>
-                      )}
-                    </button>
+                      {/* Left: Icon + Info */}
+                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                        <div className="w-11 h-11 rounded-2xl bg-white/70 border border-white/80 shadow-[0_4px_12px_rgba(15,118,110,0.06),inset_0_1px_1px_#ffffff] flex items-center justify-center shrink-0">
+                          {getTaskIcon(task)}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-base font-black text-slate-800 truncate tracking-tight">
+                            {task.title}
+                          </h4>
+                          {task.category && (
+                            <div className="mt-1 flex items-center gap-1.5">
+                              {/* Category dot using task.color — only dot, not card background */}
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: task.color || '#14b8a6' }}
+                              />
+                              <span className="text-[10px] font-extrabold text-teal-900 bg-teal-500/15 px-2.5 py-0.5 rounded-full border border-teal-400/30">
+                                {task.category}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right: Complete button */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={isChecking}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isChecking) return;
+                            handleCheckTask(task);
+                          }}
+                          className={`btn-volumetric-cyan px-4 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center justify-center gap-1.5 text-xs font-extrabold shadow-md tracking-tight active:scale-95 transition-all duration-200 select-none min-w-[104px] sm:min-w-[114px] ${
+                            isChecking
+                              ? 'bg-emerald-500 text-white shadow-inner scale-95 pointer-events-none'
+                              : ''
+                          }`}
+                          title="Выполнить (убрать в корзину дня)"
+                        >
+                          <Check
+                            className={`w-3.5 h-3.5 stroke-[3] text-white transition-transform duration-200 ${
+                              isChecking ? 'scale-125' : ''
+                            }`}
+                          />
+                          <span className="text-white font-black">
+                            {isChecking ? 'Готово!' : 'Выполнить'}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );

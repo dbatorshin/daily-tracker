@@ -121,7 +121,7 @@ export const CelebrationCard: React.FC<CelebrationCardProps> = ({
   }, [chosenIndex]);
 
   return (
-    <div className="glass-panel p-6 sm:p-7 text-center overflow-hidden relative select-none">
+    <div className="glass-panel p-6 sm:p-7 text-center overflow-hidden relative select-none animate-in fade-in duration-300">
       {/* Background ambient glow matching variant */}
       <div className="absolute inset-0 pointer-events-none opacity-40 bg-radial from-orange-300/30 via-transparent to-transparent" />
 

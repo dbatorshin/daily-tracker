@@ -43,11 +43,20 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   onSave,
   onDeletePermanently,
 }) => {
-  const { categories, addCategory, deleteCategory } = useRoutines();
+  const {
+    categories,
+    addCategory,
+    deleteCategory,
+    selectedDate,
+    viewMode,
+    removeTaskFromSunday,
+  } = useRoutines();
+  const isSundayContext = viewMode === 'day' && selectedDate.getDay() === 0;
+
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Здоровье');
   const [color, setColor] = useState('#2563eb');
-  const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>([1, 2, 3, 4, 5, 6]);
+  const [daysOfWeek, setDaysOfWeek] = useState<DayOfWeek[]>([0, 1, 2, 3, 4, 5, 6]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmDeleteCat, setConfirmDeleteCat] = useState(false);
   const [newCategoryInput, setNewCategoryInput] = useState('');
@@ -67,14 +76,15 @@ export const TaskModal: React.FC<TaskModalProps> = ({
       setTitle(taskToEdit.title);
       setCategory(taskToEdit.category || 'Здоровье');
       setColor(taskToEdit.color || '#2563eb');
-      setDaysOfWeek(taskToEdit.daysOfWeek || [1, 2, 3, 4, 5, 6]);
+      setDaysOfWeek(taskToEdit.daysOfWeek || [0, 1, 2, 3, 4, 5, 6]);
       setConfirmDelete(false);
       setConfirmDeleteCat(false);
     } else {
       setTitle('');
       setCategory('Здоровье');
       setColor('#2563eb');
-      setDaysOfWeek([1, 2, 3, 4, 5, 6]);
+      // Rule 2: A new task appears both in Mon-Sat and in Sunday
+      setDaysOfWeek([0, 1, 2, 3, 4, 5, 6]);
       setConfirmDelete(false);
       setConfirmDeleteCat(false);
     }
@@ -92,17 +102,17 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     }
   };
 
-  const setPreset = (preset: 'all' | 'weekdays' | 'weekend') => {
+  const setPreset = (preset: 'all' | 'mon-sat' | 'weekdays') => {
     haptic.light();
     switch (preset) {
       case 'all':
         setDaysOfWeek([0, 1, 2, 3, 4, 5, 6]);
         break;
+      case 'mon-sat':
+        setDaysOfWeek([1, 2, 3, 4, 5, 6]);
+        break;
       case 'weekdays':
         setDaysOfWeek([1, 2, 3, 4, 5]);
-        break;
-      case 'weekend':
-        setDaysOfWeek([0, 6]);
         break;
     }
   };
@@ -122,13 +132,30 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     onClose();
   };
 
+  // Rule 1: If deleted in Mon-Sat -> deleted permanently (acts on Sunday too)
+  // Rule 2: If deleted from Sunday -> only removed from Sunday (Mon-Sat stays)
   const handleDelete = () => {
-    if (!taskToEdit || !onDeletePermanently) return;
+    if (!taskToEdit) return;
     if (!confirmDelete) {
       haptic.medium();
       setConfirmDelete(true);
       return;
     }
+    haptic.celebrate();
+
+    if (isSundayContext) {
+      removeTaskFromSunday(taskToEdit.id);
+      onClose();
+    } else {
+      if (onDeletePermanently) {
+        onDeletePermanently(taskToEdit.id);
+      }
+      onClose();
+    }
+  };
+
+  const handleDeletePermanentlyEverywhere = () => {
+    if (!taskToEdit || !onDeletePermanently) return;
     haptic.celebrate();
     onDeletePermanently(taskToEdit.id);
     onClose();
@@ -376,6 +403,19 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => setPreset('mon-sat')}
+                  style={{ outline: 'none' }}
+                  className={`py-2 px-1 text-[11px] sm:text-xs rounded-xl font-black border-2 text-center transition outline-none focus:outline-none flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 ${
+                    daysOfWeek.length === 6 && !daysOfWeek.includes(0)
+                      ? 'btn-volumetric-cyan text-white shadow-sm border-orange-600'
+                      : 'bg-white text-slate-700 border-stone-200 hover:bg-stone-50'
+                  }`}
+                >
+                  <span>💼 Пн&#8209;Сб</span>
+                  <span className="whitespace-nowrap text-[10px] sm:text-[11px] opacity-90">(без Вс)</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setPreset('weekdays')}
                   style={{ outline: 'none' }}
                   className={`py-2 px-1 text-[11px] sm:text-xs rounded-xl font-black border-2 text-center transition outline-none focus:outline-none flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 ${
@@ -384,21 +424,8 @@ export const TaskModal: React.FC<TaskModalProps> = ({
                       : 'bg-white text-slate-700 border-stone-200 hover:bg-stone-50'
                   }`}
                 >
-                  <span>💼 Будни</span>
+                  <span>☕ Будни</span>
                   <span className="whitespace-nowrap text-[10px] sm:text-[11px] opacity-90">(Пн&#8209;Пт)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreset('weekend')}
-                  style={{ outline: 'none' }}
-                  className={`py-2 px-1 text-[11px] sm:text-xs rounded-xl font-black border-2 text-center transition outline-none focus:outline-none flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 ${
-                    daysOfWeek.length === 2 && daysOfWeek.includes(0) && daysOfWeek.includes(6)
-                      ? 'btn-volumetric-cyan text-white shadow-sm border-orange-600'
-                      : 'bg-white text-slate-700 border-stone-200 hover:bg-stone-50'
-                  }`}
-                >
-                  <span>☕ Выходные</span>
-                  <span className="whitespace-nowrap text-[10px] sm:text-[11px] opacity-90">(Сб&#8209;Вс)</span>
                 </button>
               </div>
 
@@ -447,18 +474,45 @@ export const TaskModal: React.FC<TaskModalProps> = ({
 
           {/* Action Buttons - Fixed sticky footer, ALWAYS visible on iPhone */}
           <div className="p-3.5 sm:p-4 border-t border-orange-100 bg-[#fbf8f3] shrink-0 flex items-center justify-between gap-2">
-            {taskToEdit && onDeletePermanently ? (
-              <button
-                type="button"
-                onClick={handleDelete}
-                style={{ outline: 'none' }}
-                className={`btn-volumetric-glass px-3.5 py-2 text-xs font-black rounded-xl transition flex items-center gap-1.5 outline-none ${
-                  confirmDelete ? 'bg-rose-600 text-white' : 'text-rose-600'
-                }`}
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>{confirmDelete ? 'Подтвердите' : 'Удалить'}</span>
-              </button>
+            {taskToEdit ? (
+              <div className="flex flex-col gap-1 items-start">
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  style={{ outline: 'none' }}
+                  className={`btn-volumetric-glass px-3.5 py-2 text-xs font-black rounded-xl transition flex items-center gap-1.5 outline-none ${
+                    confirmDelete ? 'bg-rose-600 text-white' : 'text-rose-600'
+                  }`}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>
+                    {confirmDelete
+                      ? isSundayContext
+                        ? 'Подтвердите: убрать из Вс'
+                        : 'Подтвердите удаление'
+                      : isSundayContext
+                      ? 'Удалить из Вс'
+                      : 'Удалить'}
+                  </span>
+                </button>
+                {confirmDelete && isSundayContext && (
+                  <div className="flex items-center gap-2 pl-1">
+                    <span className="text-[10px] text-slate-500 font-semibold">
+                      (в Пн–Сб останется)
+                    </span>
+                    {onDeletePermanently && (
+                      <button
+                        type="button"
+                        onClick={handleDeletePermanentlyEverywhere}
+                        className="text-[10px] text-rose-500 hover:text-rose-700 underline font-extrabold cursor-pointer"
+                        title="Удалить действие полностью со всех дней"
+                      >
+                        Удалить везде
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
             ) : (
               <div />
             )}

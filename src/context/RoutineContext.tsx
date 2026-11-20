@@ -45,7 +45,10 @@ interface RoutineContextType {
   createTask: (task: Omit<TaskTemplate, 'id' | 'createdAt' | 'order'>) => void;
   updateTask: (id: string, updates: Partial<TaskTemplate>) => void;
   deleteTaskPermanently: (id: string) => void;
+  removeTaskFromSunday: (id: string) => void;
+  addTaskToSunday: (id: string) => void;
   reorderTasks: (newTasks: TaskTemplate[]) => void;
+  selectedDayOfWeek: DayOfWeek;
   
   // Account & Sync Actions
   switchAccount: (email: string) => void;
@@ -336,6 +339,48 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
         tasks: updatedTasks,
         deletedTaskIds: updatedDeleted,
         history: updatedHistory,
+      };
+    });
+  };
+
+  // Remove task from Sunday only (in Mon-Sat it remains active)
+  const removeTaskFromSunday = (id: string) => {
+    isUserMutationRef.current = true;
+    mutationCounterRef.current++;
+    setAppData((prev) => {
+      const task = prev.tasks.find((t) => t.id === id);
+      if (!task) return prev;
+      const remainingDays = (task.daysOfWeek || []).filter((d) => d !== 0);
+      if (remainingDays.length === 0) {
+        // If it had only Sunday, delete permanently
+        const updatedDeleted = Array.from(new Set([...(prev.deletedTaskIds || []), id]));
+        const updatedTasks = prev.tasks.filter((t) => t.id !== id);
+        return {
+          ...prev,
+          tasks: updatedTasks,
+          deletedTaskIds: updatedDeleted,
+        };
+      }
+      return {
+        ...prev,
+        tasks: prev.tasks.map((t) => (t.id === id ? { ...t, daysOfWeek: remainingDays } : t)),
+      };
+    });
+  };
+
+  // Add existing task to Sunday (makes it active on Sunday too)
+  const addTaskToSunday = (id: string) => {
+    isUserMutationRef.current = true;
+    mutationCounterRef.current++;
+    setAppData((prev) => {
+      const task = prev.tasks.find((t) => t.id === id);
+      if (!task) return prev;
+      if (task.daysOfWeek.includes(0)) return prev;
+      return {
+        ...prev,
+        tasks: prev.tasks.map((t) =>
+          t.id === id ? { ...t, daysOfWeek: [...t.daysOfWeek, 0 as DayOfWeek] } : t
+        ),
       };
     });
   };
@@ -702,7 +747,10 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
         createTask,
         updateTask,
         deleteTaskPermanently,
+        removeTaskFromSunday,
+        addTaskToSunday,
         reorderTasks,
+        selectedDayOfWeek,
         switchAccount,
         updateAccountSettings,
         triggerSync,

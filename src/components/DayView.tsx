@@ -19,6 +19,8 @@ import {
   Target,
   Smile,
   AlertTriangle,
+  CalendarOff,
+  Plus,
 } from 'lucide-react';
 import { format, addDays, subDays, isToday } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -60,15 +62,23 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
     moveToTrash,
     restoreFromTrash,
     reorderTasks,
+    addTaskToSunday,
     appData,
   } = useRoutines();
 
   const [isTrashOpen, setIsTrashOpen] = useState(false);
+  const [isExcludedOpen, setIsExcludedOpen] = useState(false);
   const [completingTaskIds, setCompletingTaskIds] = useState<string[]>([]);
 
   const isCurrentToday = isToday(selectedDate);
   const isSunday = selectedDate.getDay() === 0;
   const isSaturday = selectedDate.getDay() === 6;
+
+  // Tasks from Mon-Sat that are excluded in Sunday
+  const excludedSundayTasks = useMemo(() => {
+    if (!isSunday) return [];
+    return (appData?.tasks || []).filter((t) => !t.daysOfWeek.includes(0));
+  }, [isSunday, appData?.tasks]);
 
   const selectedDateStr = useMemo(() => format(selectedDate, 'yyyy-MM-dd'), [selectedDate]);
   const currentDayLog = appData?.history[selectedDateStr];
@@ -467,7 +477,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2 px-1 sm:px-2 pt-1">
           <span className="text-[11px] sm:text-xs font-black text-slate-700 uppercase tracking-wide whitespace-nowrap shrink-0">
-            Действия на день ({activeTasks.length})
+            {isSunday ? 'Действия на воскресенье' : 'Действия на день'} ({activeTasks.length})
           </span>
           <span className="text-[10px] sm:text-[11px] text-slate-500 font-bold whitespace-nowrap shrink-0">
             Нажмите для настройки
@@ -485,7 +495,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
               </p>
               <p className="text-xs text-slate-600 max-w-xs mx-auto font-medium">
                 {isSunday
-                  ? 'В воскресенье большинство действий исключены расписанием.'
+                  ? 'В воскресенье все действия выполнены или исключены расписанием.'
                   : 'На этот день нет запланированных действий.'}
               </p>
               <button
@@ -619,6 +629,84 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
           </div>
         )}
       </div>
+
+      {/* Excluded in Sunday Section (Sunday works relatively separately) */}
+      {isSunday && excludedSundayTasks.length > 0 && (
+        <div className="pt-2">
+          <div className="glass-panel p-4 sm:p-5 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => {
+                haptic.light();
+                setIsExcludedOpen(!isExcludedOpen);
+              }}
+              className="w-full flex items-center justify-between text-left cursor-pointer"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-2xl bg-amber-500/15 border border-amber-400/30 text-amber-700 flex items-center justify-center shrink-0">
+                  <CalendarOff className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-black text-slate-800">
+                      Исключены в воскресенье
+                    </span>
+                    <span className="px-2 py-0.2 text-[10px] font-black rounded-full bg-amber-500/20 text-amber-800 border border-amber-300">
+                      {excludedSundayTasks.length}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 font-semibold">
+                    Действуют в Пн–Сб, но отключены в Вс
+                  </p>
+                </div>
+              </div>
+
+              <span className="text-xs font-black text-amber-800">
+                {isExcludedOpen ? 'Скрыть' : 'Показать'}
+              </span>
+            </button>
+
+            {isExcludedOpen && (
+              <div className="mt-3.5 pt-3.5 border-t border-amber-200/60 space-y-2">
+                {excludedSundayTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="p-3 rounded-2xl bg-white/60 border border-amber-200/70 flex items-center justify-between gap-3 shadow-sm"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: task.color || '#f97316' }}
+                      />
+                      <span className="text-xs font-bold text-slate-700 truncate min-w-0 flex-1">
+                        {task.title}
+                      </span>
+                      {task.category && (
+                        <span className="text-[9px] font-bold text-teal-800 bg-teal-500/15 border border-teal-400/30 px-2 py-0.5 rounded-full shrink-0 truncate max-w-[110px]">
+                          {task.category}
+                        </span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        haptic.success();
+                        addTaskToSunday(task.id);
+                      }}
+                      className="btn-volumetric-cyan px-3 py-1.5 text-[11px] font-black text-white rounded-full flex items-center gap-1 shrink-0 cursor-pointer shadow-sm active:scale-95 transition"
+                      title="Включить это действие в воскресенье"
+                    >
+                      <Plus className="w-3 h-3 stroke-[2.5]" />
+                      <span>В воскресенье</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Trash Section */}
       <div className="pt-2">

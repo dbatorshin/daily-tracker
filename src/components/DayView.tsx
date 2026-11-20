@@ -508,7 +508,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
             />
           )
         ) : (
-          <div data-task-list className="flex flex-col">
+          <div data-task-list className="flex flex-col w-full min-w-0">
             {activeTasks.map((task) => {
               const isChecking = completingTaskIds.includes(task.id);
               const isDragging = draggingTaskId === task.id;
@@ -520,7 +520,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                 <div
                   key={task.id}
                   data-task-id={task.id}
-                  className={`task-row-container ${isChecking ? 'is-completing' : ''}`}
+                  className={`task-row-container w-full min-w-0 ${isChecking ? 'is-completing' : ''}`}
                 >
                   {/* Drop indicator above */}
                   {isDropTargetBefore && !isDragging && (
@@ -533,36 +533,39 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                     </div>
                   )}
 
-                  <div className="task-row-content">
+                  <div className="task-row-content w-full min-w-0">
                     <div
                       onPointerDown={(e) => handlePointerDown(e, task.id)}
                       onPointerMove={handlePointerMove}
                       onPointerUp={handlePointerUp}
                       onPointerCancel={handlePointerCancel}
                       onClick={() => handleClickCard(task)}
-                      className={`${cardClass} flex items-center justify-between gap-3.5 cursor-pointer active:scale-[0.99] select-none transition-all ${
+                      className={`${cardClass} w-full min-w-0 flex items-center justify-between gap-2.5 sm:gap-3.5 cursor-pointer active:scale-[0.99] select-none transition-all ${
                         isDragging ? 'is-active-dragging' : ''
                       }`}
                       title="Зажмите для перетаскивания или нажмите для настройки"
                     >
                       {/* Left: Icon + Info */}
-                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                        <div className="w-11 h-11 rounded-2xl bg-white/70 border border-white/80 shadow-[0_4px_12px_rgba(15,118,110,0.06),inset_0_1px_1px_#ffffff] flex items-center justify-center shrink-0">
+                      <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1 overflow-hidden">
+                        <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white/70 border border-white/80 shadow-[0_4px_12px_rgba(15,118,110,0.06),inset_0_1px_1px_#ffffff] flex items-center justify-center shrink-0">
                           {getTaskIcon(task)}
                         </div>
 
-                        <div className="min-w-0 flex-1">
-                          <h4 className="text-base font-black text-slate-800 truncate tracking-tight">
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          <h4
+                            className="text-sm sm:text-base font-black text-slate-800 leading-snug line-clamp-2 break-words tracking-tight"
+                            title={task.title}
+                          >
                             {task.title}
                           </h4>
                           {task.category && (
-                            <div className="mt-1 flex items-center gap-1.5">
+                            <div className="mt-1 flex items-center gap-1.5 min-w-0">
                               {/* Category dot using task.color */}
                               <span
                                 className="w-2 h-2 rounded-full shrink-0"
                                 style={{ backgroundColor: task.color || '#14b8a6' }}
                               />
-                              <span className="text-[10px] font-extrabold text-teal-900 bg-teal-500/15 px-2.5 py-0.5 rounded-full border border-teal-400/30">
+                              <span className="text-[10px] font-extrabold text-teal-900 bg-teal-500/15 px-2.5 py-0.5 rounded-full border border-teal-400/30 truncate max-w-full">
                                 {task.category}
                               </span>
                             </div>
@@ -580,7 +583,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                             if (isChecking || isDragging) return;
                             handleCheckTask(task);
                           }}
-                          className={`btn-volumetric-cyan px-4 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center justify-center gap-1.5 text-xs font-extrabold shadow-md tracking-tight active:scale-95 transition-all duration-200 select-none min-w-[104px] sm:min-w-[114px] ${
+                          className={`btn-volumetric-cyan px-3 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center justify-center gap-1.5 text-xs font-extrabold shadow-md tracking-tight active:scale-95 transition-all duration-200 select-none min-w-[92px] sm:min-w-[104px] shrink-0 ${
                             isChecking
                               ? 'bg-emerald-500 text-white shadow-inner scale-95 pointer-events-none'
                               : ''
@@ -671,16 +674,16 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                       key={task.id}
                       className="p-3 rounded-2xl bg-white/50 border border-white/70 flex items-center justify-between gap-3 shadow-sm"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
                         <span
                           className="w-2.5 h-2.5 rounded-full shrink-0 opacity-60"
                           style={{ backgroundColor: task.color || '#3b82f6' }}
                         />
-                        <span className="text-xs font-bold text-slate-400 line-through truncate">
+                        <span className="text-xs font-bold text-slate-400 line-through truncate min-w-0 flex-1">
                           {task.title}
                         </span>
                         {task.category && (
-                          <span className="text-[9px] font-bold text-slate-400 bg-white/60 px-2 py-0.5 rounded-full">
+                          <span className="text-[9px] font-bold text-slate-400 bg-white/60 px-2 py-0.5 rounded-full shrink-0 truncate max-w-[110px]">
                             {task.category}
                           </span>
                         )}

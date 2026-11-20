@@ -237,7 +237,7 @@ export const WeekView: React.FC = () => {
                             }
                           }}
                           title={isDone ? 'Вернуть' : 'Выполнить'}
-                          className="flex items-center gap-1.5 py-1 px-1 rounded-lg cursor-pointer transition-colors duration-150"
+                          className="flex items-center gap-1.5 py-1 px-1 rounded-lg cursor-pointer transition-colors duration-150 w-full min-w-0"
                           style={{
                             opacity: isDone ? 0.45 : 1,
                           }}
@@ -255,7 +255,7 @@ export const WeekView: React.FC = () => {
                           />
                           {/* Task title */}
                           <span
-                            className="truncate flex-1 text-xs font-semibold"
+                            className="truncate flex-1 min-w-0 text-xs font-semibold"
                             style={{
                               color: isDone ? '#94a3b8' : '#334155',
                               textDecoration: isDone ? 'line-through' : 'none',

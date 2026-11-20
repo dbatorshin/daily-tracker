@@ -548,6 +548,17 @@ button::-moz-focus-inner,
   pointer-events: none;
 }
 
+.drag-handle {
+  cursor: grab;
+  touch-action: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
 @keyframes checkPopSpring {
   0%   { transform: scale(0.7) rotate(-10deg); opacity: 0.5; }
   60%  { transform: scale(1.18) rotate(4deg);  opacity: 1;   }

@@ -19,6 +19,7 @@ import {
   Target,
   Smile,
   AlertTriangle,
+  GripVertical,
 } from 'lucide-react';
 import { format, addDays, subDays, isToday } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -59,6 +60,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
     totalScheduledToday,
     moveToTrash,
     restoreFromTrash,
+    reorderTasks,
     appData,
   } = useRoutines();
 
@@ -134,6 +136,159 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
   const handleRestoreTask = (task: TaskTemplate) => {
     haptic.medium();
     restoreFromTrash(task.id);
+  };
+
+  // Drag & drop reordering state
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    taskId: string;
+    position: 'before' | 'after';
+  } | null>(null);
+
+  const pointerStateRef = useRef<{
+    pointerId: number;
+    taskId: string;
+    startX: number;
+    startY: number;
+    isDragging: boolean;
+  } | null>(null);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, taskId: string) => {
+    if (e.button !== 0) return;
+    if (activeTasks.length <= 1) return;
+
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {}
+
+    pointerStateRef.current = {
+      pointerId: e.pointerId,
+      taskId,
+      startX: e.clientX,
+      startY: e.clientY,
+      isDragging: false,
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const state = pointerStateRef.current;
+    if (!state || state.pointerId !== e.pointerId) return;
+
+    if (!state.isDragging) {
+      const dist = Math.hypot(e.clientX - state.startX, e.clientY - state.startY);
+      if (dist > 5) {
+        state.isDragging = true;
+        setDraggingTaskId(state.taskId);
+        haptic.medium();
+      } else {
+        return;
+      }
+    }
+
+    // Auto-scroll when near top or bottom of viewport
+    if (e.clientY < 80) {
+      window.scrollBy({ top: -7, behavior: 'instant' });
+    } else if (e.clientY > window.innerHeight - 80) {
+      window.scrollBy({ top: 7, behavior: 'instant' });
+    }
+
+    // Find card under pointer
+    const elements = document.elementsFromPoint(e.clientX, e.clientY);
+    let targetCardEl: HTMLElement | null = null;
+    for (const el of elements) {
+      const card = el.closest<HTMLElement>('[data-task-id]');
+      if (card && card.getAttribute('data-task-id') !== state.taskId) {
+        targetCardEl = card;
+        break;
+      }
+    }
+
+    if (targetCardEl) {
+      const targetId = targetCardEl.getAttribute('data-task-id');
+      if (targetId) {
+        const rect = targetCardEl.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        const position: 'before' | 'after' = e.clientY < midY ? 'before' : 'after';
+
+        setDropTarget((prev) => {
+          if (prev?.taskId === targetId && prev?.position === position) return prev;
+          haptic.light();
+          return { taskId: targetId, position };
+        });
+        return;
+      }
+    }
+
+    // Check if dragging above the first or below the last card
+    const listEl = document.querySelector('[data-task-list]');
+    if (listEl) {
+      const listRect = listEl.getBoundingClientRect();
+      if (e.clientY < listRect.top && activeTasks.length > 0) {
+        const first = activeTasks[0];
+        if (first.id !== state.taskId) {
+          setDropTarget((prev) => {
+            if (prev?.taskId === first.id && prev?.position === 'before') return prev;
+            return { taskId: first.id, position: 'before' };
+          });
+          return;
+        }
+      } else if (e.clientY > listRect.bottom && activeTasks.length > 0) {
+        const last = activeTasks[activeTasks.length - 1];
+        if (last.id !== state.taskId) {
+          setDropTarget((prev) => {
+            if (prev?.taskId === last.id && prev?.position === 'after') return prev;
+            return { taskId: last.id, position: 'after' };
+          });
+          return;
+        }
+      }
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    const state = pointerStateRef.current;
+    if (!state || state.pointerId !== e.pointerId) return;
+
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+
+    if (state.isDragging && dropTarget) {
+      const fromIdx = activeTasks.findIndex((t) => t.id === state.taskId);
+      const toTaskIdx = activeTasks.findIndex((t) => t.id === dropTarget.taskId);
+
+      if (fromIdx !== -1 && toTaskIdx !== -1) {
+        let targetIdx = toTaskIdx;
+        if (dropTarget.position === 'after') {
+          targetIdx += 1;
+        }
+        if (fromIdx < targetIdx) {
+          targetIdx -= 1;
+        }
+
+        if (fromIdx !== targetIdx) {
+          const newOrdered = [...activeTasks];
+          const [moved] = newOrdered.splice(fromIdx, 1);
+          newOrdered.splice(targetIdx, 0, moved);
+
+          reorderTasks(newOrdered);
+          haptic.success();
+        }
+      }
+    }
+
+    pointerStateRef.current = null;
+    setDraggingTaskId(null);
+    setDropTarget(null);
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
+    pointerStateRef.current = null;
+    setDraggingTaskId(null);
+    setDropTarget(null);
   };
 
   // Date formatting
@@ -292,39 +447,73 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
             />
           )
         ) : (
-          <div className="flex flex-col">
+          <div data-task-list className="flex flex-col">
             {activeTasks.map((task) => {
               const isChecking = completingTaskIds.includes(task.id);
+              const isDragging = draggingTaskId === task.id;
+              const isDropTargetBefore = dropTarget?.taskId === task.id && dropTarget?.position === 'before';
+              const isDropTargetAfter = dropTarget?.taskId === task.id && dropTarget?.position === 'after';
               const cardClass = isSaturday ? 'task-card-saturday' : 'task-card';
 
               return (
                 <div
                   key={task.id}
+                  data-task-id={task.id}
                   className={`task-row-container ${isChecking ? 'is-completing' : ''}`}
                 >
+                  {/* Drop indicator above */}
+                  {isDropTargetBefore && !isDragging && (
+                    <div className="py-1 px-1 flex items-center gap-2 animate-in fade-in zoom-in-95 duration-150 select-none">
+                      <div className="h-1 flex-1 rounded-full bg-gradient-to-r from-orange-400 via-amber-400 to-orange-400 shadow-[0_0_8px_rgba(249,115,22,0.5)]" />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-orange-600 bg-orange-100/90 border border-orange-300 px-2 py-0.5 rounded-full shadow-sm">
+                        Сюда
+                      </span>
+                      <div className="h-1 flex-1 rounded-full bg-gradient-to-r from-orange-400 via-amber-400 to-orange-400 shadow-[0_0_8px_rgba(249,115,22,0.5)]" />
+                    </div>
+                  )}
+
                   <div className="task-row-content">
                     <div
                       onClick={() => {
-                        if (isChecking) return;
+                        if (isChecking || isDragging) return;
                         haptic.light();
                         onEditTask(task);
                       }}
-                      className={`${cardClass} flex items-center justify-between gap-3.5 cursor-pointer active:scale-[0.99] select-none`}
+                      className={`${cardClass} flex items-center justify-between gap-2.5 sm:gap-3.5 cursor-pointer active:scale-[0.99] select-none transition-all ${
+                        isDragging
+                          ? 'opacity-60 scale-[0.98] ring-2 ring-orange-400 shadow-xl border-orange-300'
+                          : ''
+                      }`}
                       title="Нажмите на карточку для настройки действия"
                     >
-                      {/* Left: Icon + Info */}
-                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                        <div className="w-11 h-11 rounded-2xl bg-white/70 border border-white/80 shadow-[0_4px_12px_rgba(15,118,110,0.06),inset_0_1px_1px_#ffffff] flex items-center justify-center shrink-0">
+                      {/* Left: Drag Grip Handle + Icon + Info */}
+                      <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                        {/* Drag Handle (Active only when > 1 task) */}
+                        {activeTasks.length > 1 && (
+                          <div
+                            onPointerDown={(e) => handlePointerDown(e, task.id)}
+                            onPointerMove={handlePointerMove}
+                            onPointerUp={handlePointerUp}
+                            onPointerCancel={handlePointerCancel}
+                            className="drag-handle touch-none select-none cursor-grab active:cursor-grabbing p-1.5 -ml-1 text-stone-400 hover:text-orange-500 active:text-orange-600 rounded-xl transition-colors flex items-center justify-center shrink-0 active:scale-95"
+                            title="Потяните для изменения порядка (применится ко всем дням)"
+                            aria-label="Перетащить действие"
+                          >
+                            <GripVertical className="w-4 h-4 stroke-[2.2]" />
+                          </div>
+                        )}
+
+                        <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white/70 border border-white/80 shadow-[0_4px_12px_rgba(15,118,110,0.06),inset_0_1px_1px_#ffffff] flex items-center justify-center shrink-0">
                           {getTaskIcon(task)}
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <h4 className="text-base font-black text-slate-800 truncate tracking-tight">
+                          <h4 className="text-sm sm:text-base font-black text-slate-800 truncate tracking-tight">
                             {task.title}
                           </h4>
                           {task.category && (
-                            <div className="mt-1 flex items-center gap-1.5">
-                              {/* Category dot using task.color — only dot, not card background */}
+                            <div className="mt-0.5 sm:mt-1 flex items-center gap-1.5">
+                              {/* Category dot using task.color */}
                               <span
                                 className="w-2 h-2 rounded-full shrink-0"
                                 style={{ backgroundColor: task.color || '#14b8a6' }}
@@ -341,13 +530,13 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                       <div className="flex items-center gap-2 shrink-0">
                         <button
                           type="button"
-                          disabled={isChecking}
+                          disabled={isChecking || isDragging}
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (isChecking) return;
+                            if (isChecking || isDragging) return;
                             handleCheckTask(task);
                           }}
-                          className={`btn-volumetric-cyan px-4 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center justify-center gap-1.5 text-xs font-extrabold shadow-md tracking-tight active:scale-95 transition-all duration-200 select-none min-w-[104px] sm:min-w-[114px] ${
+                          className={`btn-volumetric-cyan px-3.5 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center justify-center gap-1.5 text-xs font-extrabold shadow-md tracking-tight active:scale-95 transition-all duration-200 select-none min-w-[96px] sm:min-w-[114px] ${
                             isChecking
                               ? 'bg-emerald-500 text-white shadow-inner scale-95 pointer-events-none'
                               : ''
@@ -366,6 +555,17 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                       </div>
                     </div>
                   </div>
+
+                  {/* Drop indicator below */}
+                  {isDropTargetAfter && !isDragging && (
+                    <div className="py-1 px-1 flex items-center gap-2 animate-in fade-in zoom-in-95 duration-150 select-none">
+                      <div className="h-1 flex-1 rounded-full bg-gradient-to-r from-orange-400 via-amber-400 to-orange-400 shadow-[0_0_8px_rgba(249,115,22,0.5)]" />
+                      <span className="text-[10px] font-black uppercase tracking-wider text-orange-600 bg-orange-100/90 border border-orange-300 px-2 py-0.5 rounded-full shadow-sm">
+                        Сюда
+                      </span>
+                      <div className="h-1 flex-1 rounded-full bg-gradient-to-r from-orange-400 via-amber-400 to-orange-400 shadow-[0_0_8px_rgba(249,115,22,0.5)]" />
+                    </div>
+                  )}
                 </div>
               );
             })}

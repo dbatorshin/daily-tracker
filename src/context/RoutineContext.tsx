@@ -341,12 +341,43 @@ export const RoutineProvider: React.FC<{ children: ReactNode }> = ({ children })
   };
 
   const reorderTasks = (newTasks: TaskTemplate[]) => {
+    if (!newTasks || newTasks.length === 0) return;
     isUserMutationRef.current = true;
     mutationCounterRef.current++;
-    setAppData((prev) => ({
-      ...prev,
-      tasks: newTasks.map((t, idx) => ({ ...t, order: idx + 1 })),
-    }));
+
+    setAppData((prev) => {
+      const allTasks = [...prev.tasks];
+      const newIds = new Set(newTasks.map((t) => t.id));
+
+      // If newTasks already contains all tasks in prev.tasks
+      if (newTasks.length >= allTasks.length) {
+        return {
+          ...prev,
+          tasks: newTasks.map((t, idx) => ({ ...t, order: idx + 1 })),
+        };
+      }
+
+      // If newTasks is a subset (e.g. active tasks on a day where some tasks don't run or are in trash),
+      // preserve all other tasks at their relative slots!
+      const slotIndices: number[] = [];
+      allTasks.forEach((t, idx) => {
+        if (newIds.has(t.id)) {
+          slotIndices.push(idx);
+        }
+      });
+
+      const updated = [...allTasks];
+      slotIndices.forEach((slotIdx, i) => {
+        if (i < newTasks.length) {
+          updated[slotIdx] = newTasks[i];
+        }
+      });
+
+      return {
+        ...prev,
+        tasks: updated.map((t, idx) => ({ ...t, order: idx + 1 })),
+      };
+    });
   };
 
   // Account switching

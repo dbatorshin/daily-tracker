@@ -19,7 +19,6 @@ import {
   Target,
   Smile,
   AlertTriangle,
-  GripVertical,
 } from 'lucide-react';
 import { format, addDays, subDays, isToday } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -138,7 +137,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
     restoreFromTrash(task.id);
   };
 
-  // Drag & drop reordering state
+  // Drag & drop reordering state (Long-press to drag)
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     taskId: string;
@@ -151,15 +150,36 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
     startX: number;
     startY: number;
     isDragging: boolean;
+    timer: ReturnType<typeof setTimeout> | null;
+    targetEl: HTMLElement | null;
   } | null>(null);
+
+  const wasDraggingRef = useRef(false);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, taskId: string) => {
     if (e.button !== 0) return;
     if (activeTasks.length <= 1) return;
 
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {}
+    // Do not initiate drag if tapping on a button (e.g. "Выполнить")
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('[role="button"]') || target.closest('input')) {
+      return;
+    }
+
+    const currentTarget = e.currentTarget;
+
+    const timer = setTimeout(() => {
+      const state = pointerStateRef.current;
+      if (state && state.taskId === taskId) {
+        state.isDragging = true;
+        wasDraggingRef.current = true;
+        try {
+          currentTarget.setPointerCapture(state.pointerId);
+        } catch {}
+        setDraggingTaskId(taskId);
+        haptic.medium();
+      }
+    }, 200);
 
     pointerStateRef.current = {
       pointerId: e.pointerId,
@@ -167,6 +187,8 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
       startX: e.clientX,
       startY: e.clientY,
       isDragging: false,
+      timer,
+      targetEl: currentTarget,
     };
   };
 
@@ -176,13 +198,15 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
 
     if (!state.isDragging) {
       const dist = Math.hypot(e.clientX - state.startX, e.clientY - state.startY);
-      if (dist > 5) {
-        state.isDragging = true;
-        setDraggingTaskId(state.taskId);
-        haptic.medium();
-      } else {
-        return;
+      // If moved more than 8px before timer fired, it's a scroll gesture -> cancel long-press
+      if (dist > 8) {
+        if (state.timer) {
+          clearTimeout(state.timer);
+          state.timer = null;
+        }
+        pointerStateRef.current = null;
       }
+      return;
     }
 
     // Auto-scroll when near top or bottom of viewport
@@ -247,13 +271,25 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const state = pointerStateRef.current;
-    if (!state || state.pointerId !== e.pointerId) return;
+    if (state?.timer) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+
+    if (!state || state.pointerId !== e.pointerId) {
+      pointerStateRef.current = null;
+      return;
+    }
 
     try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
+      if (state.targetEl) {
+        state.targetEl.releasePointerCapture(e.pointerId);
+      }
     } catch {}
 
-    if (state.isDragging && dropTarget) {
+    const wasDragging = state.isDragging;
+
+    if (wasDragging && dropTarget) {
       const fromIdx = activeTasks.findIndex((t) => t.id === state.taskId);
       const toTaskIdx = activeTasks.findIndex((t) => t.id === dropTarget.taskId);
 
@@ -280,15 +316,40 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
     pointerStateRef.current = null;
     setDraggingTaskId(null);
     setDropTarget(null);
+
+    if (wasDragging) {
+      setTimeout(() => {
+        wasDraggingRef.current = false;
+      }, 80);
+    } else {
+      wasDraggingRef.current = false;
+    }
   };
 
   const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    const state = pointerStateRef.current;
+    if (state?.timer) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
     try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
+      if (state?.targetEl) {
+        state.targetEl.releasePointerCapture(e.pointerId);
+      }
     } catch {}
     pointerStateRef.current = null;
     setDraggingTaskId(null);
     setDropTarget(null);
+    setTimeout(() => {
+      wasDraggingRef.current = false;
+    }, 80);
+  };
+
+  const handleClickCard = (task: TaskTemplate) => {
+    if (wasDraggingRef.current || draggingTaskId) return;
+    if (completingTaskIds.includes(task.id)) return;
+    haptic.light();
+    onEditTask(task);
   };
 
   // Date formatting
@@ -474,45 +535,28 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
 
                   <div className="task-row-content">
                     <div
-                      onClick={() => {
-                        if (isChecking || isDragging) return;
-                        haptic.light();
-                        onEditTask(task);
-                      }}
-                      className={`${cardClass} flex items-center justify-between gap-2.5 sm:gap-3.5 cursor-pointer active:scale-[0.99] select-none transition-all ${
-                        isDragging
-                          ? 'opacity-60 scale-[0.98] ring-2 ring-orange-400 shadow-xl border-orange-300'
-                          : ''
+                      onPointerDown={(e) => handlePointerDown(e, task.id)}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onPointerCancel={handlePointerCancel}
+                      onClick={() => handleClickCard(task)}
+                      className={`${cardClass} flex items-center justify-between gap-3.5 cursor-pointer active:scale-[0.99] select-none transition-all ${
+                        isDragging ? 'is-active-dragging' : ''
                       }`}
-                      title="Нажмите на карточку для настройки действия"
+                      title="Зажмите для перетаскивания или нажмите для настройки"
                     >
-                      {/* Left: Drag Grip Handle + Icon + Info */}
-                      <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-                        {/* Drag Handle (Active only when > 1 task) */}
-                        {activeTasks.length > 1 && (
-                          <div
-                            onPointerDown={(e) => handlePointerDown(e, task.id)}
-                            onPointerMove={handlePointerMove}
-                            onPointerUp={handlePointerUp}
-                            onPointerCancel={handlePointerCancel}
-                            className="drag-handle touch-none select-none cursor-grab active:cursor-grabbing p-1.5 -ml-1 text-stone-400 hover:text-orange-500 active:text-orange-600 rounded-xl transition-colors flex items-center justify-center shrink-0 active:scale-95"
-                            title="Потяните для изменения порядка (применится ко всем дням)"
-                            aria-label="Перетащить действие"
-                          >
-                            <GripVertical className="w-4 h-4 stroke-[2.2]" />
-                          </div>
-                        )}
-
-                        <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-white/70 border border-white/80 shadow-[0_4px_12px_rgba(15,118,110,0.06),inset_0_1px_1px_#ffffff] flex items-center justify-center shrink-0">
+                      {/* Left: Icon + Info */}
+                      <div className="flex items-center gap-3.5 min-w-0 flex-1">
+                        <div className="w-11 h-11 rounded-2xl bg-white/70 border border-white/80 shadow-[0_4px_12px_rgba(15,118,110,0.06),inset_0_1px_1px_#ffffff] flex items-center justify-center shrink-0">
                           {getTaskIcon(task)}
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <h4 className="text-sm sm:text-base font-black text-slate-800 truncate tracking-tight">
+                          <h4 className="text-base font-black text-slate-800 truncate tracking-tight">
                             {task.title}
                           </h4>
                           {task.category && (
-                            <div className="mt-0.5 sm:mt-1 flex items-center gap-1.5">
+                            <div className="mt-1 flex items-center gap-1.5">
                               {/* Category dot using task.color */}
                               <span
                                 className="w-2 h-2 rounded-full shrink-0"
@@ -536,7 +580,7 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
                             if (isChecking || isDragging) return;
                             handleCheckTask(task);
                           }}
-                          className={`btn-volumetric-cyan px-3.5 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center justify-center gap-1.5 text-xs font-extrabold shadow-md tracking-tight active:scale-95 transition-all duration-200 select-none min-w-[96px] sm:min-w-[114px] ${
+                          className={`btn-volumetric-cyan px-4 py-2 sm:px-5 sm:py-2.5 rounded-full flex items-center justify-center gap-1.5 text-xs font-extrabold shadow-md tracking-tight active:scale-95 transition-all duration-200 select-none min-w-[104px] sm:min-w-[114px] ${
                             isChecking
                               ? 'bg-emerald-500 text-white shadow-inner scale-95 pointer-events-none'
                               : ''

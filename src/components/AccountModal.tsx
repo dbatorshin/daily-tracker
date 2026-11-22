@@ -16,10 +16,19 @@ import {
   Smartphone,
   Copy,
   Check,
+  ScanFace,
 } from 'lucide-react';
 import { useRoutines } from '../context/RoutineContext';
 import { haptic } from '../utils/haptics';
 import { isPinConfigured, removeAppPin, lockApp } from './PinLock';
+import {
+  isBiometricsSupported,
+  isBiometricsConfigured,
+  isBiometricsEnabled,
+  setBiometricsEnabled,
+  registerBiometrics,
+  removeBiometrics,
+} from '../utils/biometrics';
 
 interface AccountModalProps {
   isOpen: boolean;
@@ -49,11 +58,44 @@ export const AccountModal: React.FC<AccountModalProps> = ({ isOpen, onClose, onL
   const [hasPinState, setHasPinState] = useState(() => isPinConfigured());
   const [copiedLink, setCopiedLink] = useState(false);
 
+  // Biometrics Face ID state
+  const [canUseBio, setCanUseBio] = useState(false);
+  const [isBioConfiguredState, setIsBioConfiguredState] = useState(() => isBiometricsConfigured());
+  const [isBioEnabledState, setIsBioEnabledState] = useState(() => isBiometricsEnabled());
+  const [isSettingUpBio, setIsSettingUpBio] = useState(false);
+
   useEffect(() => {
     if (isOpen) {
       setHasPinState(isPinConfigured());
+      isBiometricsSupported().then(setCanUseBio);
+      setIsBioConfiguredState(isBiometricsConfigured());
+      setIsBioEnabledState(isBiometricsEnabled());
     }
   }, [isOpen]);
+
+  const handleToggleBio = () => {
+    haptic.light();
+    const next = !isBioEnabledState;
+    setBiometricsEnabled(next);
+    setIsBioEnabledState(next);
+  };
+
+  const handleSetupBio = async () => {
+    haptic.medium();
+    setIsSettingUpBio(true);
+    try {
+      const res = await registerBiometrics();
+      if (res.success) {
+        haptic.celebrate();
+        setIsBioConfiguredState(true);
+        setIsBioEnabledState(true);
+      } else if (res.error) {
+        alert(res.error);
+      }
+    } finally {
+      setIsSettingUpBio(false);
+    }
+  };
 
   useEffect(() => {
     if (appData?.account) {
@@ -472,7 +514,10 @@ alter publication supabase_realtime add table user_routines;
                   onClick={() => {
                     if (window.confirm('Сбросить PIN-код? После этого вход будет свободным.')) {
                       removeAppPin();
+                      removeBiometrics();
                       setHasPinState(false);
+                      setIsBioConfiguredState(false);
+                      setIsBioEnabledState(false);
                       haptic.success();
                     }
                   }}
@@ -484,6 +529,56 @@ alter publication supabase_realtime add table user_routines;
                 </button>
               )}
             </div>
+
+            {/* Biometrics Face ID / Touch ID block */}
+            {canUseBio && hasPinState && (
+              <div className="mt-3.5 p-3 sm:p-3.5 rounded-2xl bg-[#fff8f0] border border-orange-200/80 shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-9 h-9 rounded-2xl bg-teal-500/15 border border-teal-400/30 flex items-center justify-center text-teal-700 shrink-0">
+                      <ScanFace className="w-4 h-4 stroke-[2.2]" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-slate-800 leading-tight">
+                        Вход по Face ID / биометрии
+                      </p>
+                      <p className="text-[11px] text-slate-500 font-semibold truncate mt-0.5">
+                        {isBioConfiguredState
+                          ? isBioEnabledState
+                            ? 'Мгновенный вход без ввода PIN'
+                            : 'Биометрия временно отключена'
+                          : 'Входите по взгляду на экран'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {isBioConfiguredState ? (
+                    <button
+                      type="button"
+                      onClick={handleToggleBio}
+                      style={{ outline: 'none' }}
+                      className={`px-3.5 py-1.5 rounded-full text-xs font-black transition cursor-pointer shrink-0 ${
+                        isBioEnabledState
+                          ? 'btn-volumetric-cyan text-white shadow-sm'
+                          : 'btn-volumetric-glass text-slate-600'
+                      }`}
+                    >
+                      {isBioEnabledState ? 'Включён' : 'Выключен'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleSetupBio}
+                      disabled={isSettingUpBio}
+                      style={{ outline: 'none' }}
+                      className="btn-volumetric-cyan px-3.5 py-1.5 rounded-full text-xs font-black text-white shadow-sm cursor-pointer shrink-0"
+                    >
+                      {isSettingUpBio ? 'Настройка...' : 'Подключить'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

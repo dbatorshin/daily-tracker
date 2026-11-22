@@ -1,6 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Lock, Delete, ShieldCheck, KeyRound } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Lock, Delete, ShieldCheck, KeyRound, ScanFace } from 'lucide-react';
 import { haptic } from '../utils/haptics';
+import {
+  isBiometricsSupported,
+  isBiometricsConfigured,
+  isBiometricsEnabled,
+  authenticateWithBiometrics,
+  registerBiometrics,
+} from '../utils/biometrics';
 
 interface PinLockProps {
   onUnlock: () => void;
@@ -50,11 +57,25 @@ export function removeAppPin(): void {
 export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
-  const [step, setStep] = useState<'enter' | 'create' | 'confirm'>(() =>
+  const [step, setStep] = useState<'enter' | 'create' | 'confirm' | 'prompt_bio'>(() =>
     isPinConfigured() ? 'enter' : 'create'
   );
   const [error, setError] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
+
+  // Biometrics state
+  const [canUseBio, setCanUseBio] = useState(false);
+  const [isBioConfigured, setIsBioConfigured] = useState(() => isBiometricsConfigured());
+  const [isBioEnabled, setIsBioEnabled] = useState(() => isBiometricsEnabled());
+  const [isAuthenticatingBio, setIsAuthenticatingBio] = useState(false);
+  const [isRegisteringBio, setIsRegisteringBio] = useState(false);
+
+  // Check if device supports platform biometrics (Face ID / Touch ID / Windows Hello)
+  useEffect(() => {
+    isBiometricsSupported().then((supported) => {
+      setCanUseBio(supported);
+    });
+  }, []);
 
   const triggerError = (msg: string) => {
     setError(msg);
@@ -70,6 +91,40 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
     }, 600);
   };
 
+  // Authenticate using device biometrics
+  const handleBiometricAuth = useCallback(async () => {
+    if (!isBiometricsConfigured() || !isBiometricsEnabled()) return;
+    setIsAuthenticatingBio(true);
+    setError(null);
+    try {
+      const res = await authenticateWithBiometrics();
+      if (res.success) {
+        haptic.celebrate();
+        try {
+          sessionStorage.setItem(UNLOCKED_SESSION_KEY, 'true');
+        } catch {}
+        onUnlock();
+      } else if (!res.cancelled && res.error) {
+        // Show friendly error only if not cancelled by user
+        setError('Не удалось распознать лицо. Введите PIN');
+      }
+    } finally {
+      setIsAuthenticatingBio(false);
+    }
+  }, [onUnlock]);
+
+  // Attempt automatic Face ID on app launch
+  const hasAutoTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (step === 'enter' && !hasAutoTriggeredRef.current && isBioConfigured && isBioEnabled) {
+      hasAutoTriggeredRef.current = true;
+      const timer = setTimeout(() => {
+        handleBiometricAuth();
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [step, isBioConfigured, isBioEnabled, handleBiometricAuth]);
+
   const handleDigit = useCallback(
     (digit: string) => {
       if (pin.length >= 4) return;
@@ -79,7 +134,6 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
       setPin(nextPin);
 
       if (nextPin.length === 4) {
-        // Complete 4 digits entered
         if (step === 'enter') {
           const savedPin = localStorage.getItem(PIN_STORAGE_KEY);
           if (nextPin === savedPin) {
@@ -87,12 +141,16 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
             try {
               sessionStorage.setItem(UNLOCKED_SESSION_KEY, 'true');
             } catch {}
-            onUnlock();
+            // If biometrics is supported but not configured yet, offer to enable it!
+            if (canUseBio && !isBioConfigured) {
+              setStep('prompt_bio');
+            } else {
+              onUnlock();
+            }
           } else {
             triggerError('Неверный PIN-код');
           }
         } else if (step === 'create') {
-          // Move to confirmation step
           setTimeout(() => {
             setConfirmPin(nextPin);
             setPin('');
@@ -100,17 +158,20 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
           }, 150);
         } else if (step === 'confirm') {
           if (nextPin === confirmPin) {
-            // Success! Save PIN
             haptic.success();
             setAppPin(nextPin);
-            onUnlock();
+            if (canUseBio) {
+              setStep('prompt_bio');
+            } else {
+              onUnlock();
+            }
           } else {
             triggerError('PIN-коды не совпали. Попробуйте снова');
           }
         }
       }
     },
-    [pin, step, confirmPin, onUnlock]
+    [pin, step, confirmPin, canUseBio, isBioConfigured, onUnlock]
   );
 
   const handleDelete = useCallback(() => {
@@ -122,6 +183,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
 
   // Support hardware / physical keyboard
   useEffect(() => {
+    if (step === 'prompt_bio') return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key >= '0' && e.key <= '9') {
         e.preventDefault();
@@ -133,7 +195,88 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleDigit, handleDelete]);
+  }, [step, handleDigit, handleDelete]);
+
+  // Activate Face ID when offered
+  const handleActivateBio = async () => {
+    setIsRegisteringBio(true);
+    setError(null);
+    try {
+      const res = await registerBiometrics();
+      if (res.success) {
+        haptic.celebrate();
+        setIsBioConfigured(true);
+        setIsBioEnabled(true);
+        try {
+          sessionStorage.setItem(UNLOCKED_SESSION_KEY, 'true');
+        } catch {}
+        onUnlock();
+      } else if (res.error) {
+        setError(res.error);
+      }
+    } finally {
+      setIsRegisteringBio(false);
+    }
+  };
+
+  const handleSkipBio = () => {
+    haptic.light();
+    try {
+      sessionStorage.setItem(UNLOCKED_SESSION_KEY, 'true');
+    } catch {}
+    onUnlock();
+  };
+
+  // Screen offering Face ID setup
+  if (step === 'prompt_bio') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#fbf8f3]/95 backdrop-blur-xl animate-in fade-in duration-300 select-none">
+        <div className="w-full max-w-sm flex flex-col items-center text-center p-6 rounded-3xl bg-white/70 border border-white/80 shadow-[0_20px_50px_rgba(249,115,22,0.15)]">
+          <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-teal-400 via-cyan-400 to-sky-400 p-1 shadow-[0_10px_25px_rgba(20,184,166,0.35)] flex items-center justify-center mb-5">
+            <div className="w-full h-full rounded-[22px] bg-[#f0fdfa] flex items-center justify-center text-teal-700">
+              <ScanFace className="w-10 h-10 stroke-[2.2] text-teal-600" />
+            </div>
+          </div>
+
+          <h2 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight mb-2">
+            Вход по Face ID
+          </h2>
+
+          <p className="text-xs sm:text-sm text-slate-600 font-medium mb-6 max-w-xs leading-relaxed">
+            Включить вход по лицу или отпечатку, чтобы приложение открывалось мгновенно без ввода цифр?
+          </p>
+
+          {error && (
+            <p className="text-xs font-black text-rose-600 mb-4 animate-in fade-in">
+              {error}
+            </p>
+          )}
+
+          <div className="flex flex-col gap-2.5 w-full">
+            <button
+              type="button"
+              onClick={handleActivateBio}
+              disabled={isRegisteringBio}
+              style={{ outline: 'none' }}
+              className="btn-volumetric-cyan w-full py-3 rounded-2xl text-sm font-black text-white flex items-center justify-center gap-2 shadow-md active:scale-95 transition cursor-pointer"
+            >
+              <ScanFace className="w-4 h-4 stroke-[2.5]" />
+              <span>{isRegisteringBio ? 'Сканирование лица...' : 'Включить Face ID'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSkipBio}
+              style={{ outline: 'none' }}
+              className="btn-volumetric-glass w-full py-2.5 rounded-2xl text-xs font-bold text-slate-600 active:scale-95 transition cursor-pointer"
+            >
+              Напомнить позже
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#fbf8f3]/95 backdrop-blur-xl animate-in fade-in duration-300 select-none">
@@ -161,7 +304,9 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
         {/* Subtitle / Prompt */}
         <p className="text-xs sm:text-sm text-amber-900/70 font-semibold mb-6">
           {step === 'enter'
-            ? 'Введите 4-значный код для доступа'
+            ? isBioConfigured && isBioEnabled
+              ? 'Взгляните на экран или введите PIN-код'
+              : 'Введите 4-значный код для доступа'
             : step === 'create'
             ? 'Придумайте 4 цифры для защиты ваших дел'
             : 'Введите код ещё раз для подтверждения'}
@@ -212,10 +357,37 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
             </button>
           ))}
 
-          {/* Row 4: Empty space, 0, Backspace */}
-          <div className="w-16 h-16 sm:w-18 sm:h-18 mx-auto flex items-center justify-center text-slate-400">
-            {step === 'enter' && (
-              <KeyRound className="w-5 h-5 text-amber-900/30" />
+          {/* Row 4: Biometrics Face ID Button, 0, Backspace */}
+          <div className="w-16 h-16 sm:w-18 sm:h-18 mx-auto flex items-center justify-center">
+            {step === 'enter' && isBioConfigured && isBioEnabled ? (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={handleBiometricAuth}
+                disabled={isAuthenticatingBio}
+                style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}
+                className="btn-volumetric-cyan w-16 h-16 sm:w-18 sm:h-18 rounded-full text-white flex items-center justify-center cursor-pointer shadow-md active:scale-90 transition-all outline-none"
+                title="Войти по Face ID / биометрии"
+              >
+                <ScanFace className="w-7 h-7 sm:w-8 sm:h-8 stroke-[2.2] text-white" />
+              </button>
+            ) : step === 'enter' && canUseBio && !isBioConfigured ? (
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setStep('prompt_bio')}
+                style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}
+                className="btn-volumetric-glass w-16 h-16 sm:w-18 sm:h-18 rounded-full flex items-center justify-center cursor-pointer shadow-sm active:scale-90 transition-all outline-none"
+                title="Настроить вход по Face ID"
+              >
+                <ScanFace className="w-6 h-6 stroke-[2] text-teal-600" />
+              </button>
+            ) : (
+              <div className="w-16 h-16 sm:w-18 sm:h-18 mx-auto flex items-center justify-center text-slate-400">
+                {step === 'enter' && (
+                  <KeyRound className="w-5 h-5 text-amber-900/30" />
+                )}
+              </div>
             )}
           </div>
 
@@ -245,7 +417,9 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
         {/* Help footer note */}
         <p className="text-[11px] text-slate-500 font-semibold mt-8 max-w-xs">
           {step === 'enter'
-            ? 'Защита личных данных на вашем устройстве'
+            ? isBioConfigured && isBioEnabled
+              ? 'Нажмите на кнопку с лицом, чтобы запустить Face ID снова'
+              : 'Защита личных данных на вашем устройстве'
             : 'Код сохранится в вашем браузере для безопасного входа'}
         </p>
       </div>

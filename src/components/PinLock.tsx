@@ -92,45 +92,91 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
     }, 600);
   };
 
+  const isAuthenticatingRef = useRef(false);
+  const onUnlockRef = useRef(onUnlock);
+  useEffect(() => {
+    onUnlockRef.current = onUnlock;
+  }, [onUnlock]);
+
   // Authenticate / Register with Face ID or biometrics
-  const handleBiometricAuth = useCallback(async () => {
+  const handleBiometricAuth = useCallback(async (isAuto = false) => {
+    if (isAuthenticatingRef.current) return;
+    isAuthenticatingRef.current = true;
     setIsAuthenticatingBio(true);
     setError(null);
+
+    const startTime = Date.now();
     try {
       const res = await universalBiometricUnlock();
+      const elapsed = Date.now() - startTime;
+
       if (res.success) {
         haptic.celebrate();
         try {
           sessionStorage.setItem(UNLOCKED_SESSION_KEY, 'true');
         } catch {}
-        onUnlock();
-      } else {
-        if (!res.cancelled && res.error) {
-          setError(res.error);
-        } else if (res.cancelled) {
-          // If user dismissed Face ID, offer PIN code
-          setError('Вход отменён. Введите PIN-код');
-          setStep('enter');
+        onUnlockRef.current();
+        return;
+      }
+
+      // If user dismissed Face ID or browser blocked automatic invocation
+      if (res.cancelled || res.notAllowed) {
+        // If this was an automatic background attempt on mount and was rejected almost immediately (< 250ms),
+        // it means the browser requires an explicit user gesture (e.g. mobile Safari).
+        // Stay on the biometric screen so the very first tap anywhere triggers Face ID!
+        if (isAuto && elapsed < 250) {
+          setIsAuthenticatingBio(false);
+          isAuthenticatingRef.current = false;
+          return;
         }
+
+        // The user saw the Face ID prompt and dismissed it, or biometric scan failed:
+        // Offer PIN code immediately, exactly as requested
+        setError('Вход отменён. Введите PIN-код');
+        setStep('enter');
+      } else if (res.error) {
+        setError(res.error);
+        setStep('enter');
       }
     } catch {
       setError('Не удалось распознать лицо. Введите PIN-код');
       setStep('enter');
     } finally {
       setIsAuthenticatingBio(false);
+      isAuthenticatingRef.current = false;
     }
-  }, [onUnlock]);
+  }, []);
 
   // AUTO-TRIGGER ON LAUNCH: Seek face immediately when screen appears
   const autoBioTriggeredRef = useRef(false);
   useEffect(() => {
-    if (step === 'bio' && !autoBioTriggeredRef.current) {
-      autoBioTriggeredRef.current = true;
-      const timer = setTimeout(() => {
-        handleBiometricAuth();
-      }, 100);
-      return () => clearTimeout(timer);
-    }
+    if (step !== 'bio') return;
+    if (autoBioTriggeredRef.current) return;
+    autoBioTriggeredRef.current = true;
+
+    // Trigger auto-scan
+    handleBiometricAuth(true);
+  }, [step, handleBiometricAuth]);
+
+  // One-touch biometric trigger: tapping ANYWHERE on the screen or pressing any key invokes biometrics
+  useEffect(() => {
+    if (step !== 'bio') return;
+
+    const handleFirstUserInteraction = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest?.('[data-action="pin-fallback"]')) return;
+
+      if (!isAuthenticatingRef.current) {
+        handleBiometricAuth(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', handleFirstUserInteraction);
+    window.addEventListener('keydown', handleFirstUserInteraction);
+    return () => {
+      window.removeEventListener('pointerdown', handleFirstUserInteraction);
+      window.removeEventListener('keydown', handleFirstUserInteraction);
+    };
   }, [step, handleBiometricAuth]);
 
   const handleDigit = useCallback(
@@ -202,12 +248,11 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#fbf8f3]/95 backdrop-blur-xl animate-in fade-in duration-300 select-none cursor-pointer"
         onClick={() => {
-          if (!isAuthenticatingBio) handleBiometricAuth();
+          if (!isAuthenticatingRef.current) handleBiometricAuth(false);
         }}
       >
         <div
           className="w-full max-w-sm flex flex-col items-center text-center p-6 sm:p-8"
-          onClick={(e) => e.stopPropagation()}
         >
           {/* App Volumetric Icon */}
           <div className="w-16 h-16 rounded-3xl bg-gradient-to-br from-orange-400 via-amber-400 to-yellow-400 p-1 shadow-[0_10px_25px_rgba(249,115,22,0.35)] flex items-center justify-center mb-6">
@@ -223,7 +268,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
           <p className="text-xs sm:text-sm text-amber-900/70 font-semibold mb-8">
             {isAuthenticatingBio
               ? 'Поиск и сканирование лица...'
-              : 'Взгляните на экран или коснитесь кнопки'}
+              : 'Взгляните в камеру или коснитесь экрана'}
           </p>
 
           {/* Large Central Biometric Scanner Button */}
@@ -232,7 +277,10 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
             <div className="absolute w-32 h-32 rounded-full bg-teal-400/25 animate-pulse pointer-events-none" />
             <button
               type="button"
-              onClick={() => handleBiometricAuth()}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleBiometricAuth(false);
+              }}
               disabled={isAuthenticatingBio}
               style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}
               className="relative btn-volumetric-cyan w-24 h-24 sm:w-28 sm:h-28 rounded-full text-white flex items-center justify-center cursor-pointer shadow-xl active:scale-95 transition-all outline-none"
@@ -256,7 +304,9 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
           <div className="mt-8 pt-4 w-full">
             <button
               type="button"
-              onClick={() => {
+              data-action="pin-fallback"
+              onClick={(e) => {
+                e.stopPropagation();
                 haptic.light();
                 setStep('enter');
               }}
@@ -359,7 +409,7 @@ export const PinLock: React.FC<PinLockProps> = ({ onUnlock }) => {
                 onClick={() => {
                   haptic.light();
                   setStep('bio');
-                  handleBiometricAuth();
+                  handleBiometricAuth(false);
                 }}
                 disabled={isAuthenticatingBio}
                 style={{ outline: 'none', WebkitTapHighlightColor: 'transparent' }}

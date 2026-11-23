@@ -85,7 +85,12 @@ export function removeBiometrics(): void {
  * Register device platform biometrics (Face ID / Touch ID / Windows Hello).
  * Returns true if registration succeeded.
  */
-export async function registerBiometrics(): Promise<{ success: boolean; error?: string }> {
+export async function registerBiometrics(): Promise<{
+  success: boolean;
+  cancelled?: boolean;
+  notAllowed?: boolean;
+  error?: string;
+}> {
   try {
     const supported = await isBiometricsSupported();
     if (!supported) {
@@ -134,15 +139,17 @@ export async function registerBiometrics(): Promise<{ success: boolean; error?: 
 
     return { success: true };
   } catch (err: any) {
-    if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') {
-      return { success: false, error: 'Сканирование биометрии отменено.' };
-    }
+    const isNotAllowed = err?.name === 'NotAllowedError' || err?.name === 'AbortError';
     return {
       success: false,
-      error: err?.message || 'Ошибка настройки биометрии.',
+      cancelled: isNotAllowed,
+      notAllowed: err?.name === 'NotAllowedError',
+      error: isNotAllowed ? undefined : (err?.message || 'Ошибка настройки биометрии.'),
     };
   }
 }
+
+let isAuthOperationInProgress = false;
 
 /**
  * Authenticate with biometrics (Face ID / Touch ID / Windows Hello).
@@ -151,24 +158,40 @@ export async function registerBiometrics(): Promise<{ success: boolean; error?: 
 export async function authenticateWithBiometrics(): Promise<{
   success: boolean;
   cancelled?: boolean;
+  notAllowed?: boolean;
   error?: string;
 }> {
+  if (isAuthOperationInProgress) {
+    return { success: false, cancelled: true };
+  }
+
+  isAuthOperationInProgress = true;
   try {
     const savedId = localStorage.getItem(BIO_CRED_ID_KEY);
     if (!savedId) {
       return { success: false, error: 'Биометрия не настроена.' };
     }
 
+    let credBuffer: ArrayBuffer;
+    try {
+      credBuffer = base64ToBuffer(savedId);
+    } catch {
+      localStorage.removeItem(BIO_CRED_ID_KEY);
+      return { success: false, error: 'Данные биометрии повреждены. Введите PIN-код.' };
+    }
+
     const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const hostname = window.location.hostname;
+    const isIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
 
     const assertion = await navigator.credentials.get({
       publicKey: {
         challenge,
+        ...(isIp ? {} : { rpId: hostname }),
         allowCredentials: [
           {
-            id: base64ToBuffer(savedId),
+            id: credBuffer,
             type: 'public-key',
-            transports: ['internal'],
           },
         ],
         userVerification: 'required',
@@ -181,10 +204,15 @@ export async function authenticateWithBiometrics(): Promise<{
     }
     return { success: false, error: 'Биометрия не распознана.' };
   } catch (err: any) {
-    if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') {
-      return { success: false, cancelled: true };
-    }
-    return { success: false, error: err?.message || 'Не удалось выполнить биометрический вход.' };
+    const isNotAllowed = err?.name === 'NotAllowedError' || err?.name === 'AbortError';
+    return {
+      success: false,
+      cancelled: isNotAllowed,
+      notAllowed: err?.name === 'NotAllowedError',
+      error: isNotAllowed ? undefined : (err?.message || 'Не удалось выполнить биометрический вход.'),
+    };
+  } finally {
+    isAuthOperationInProgress = false;
   }
 }
 
@@ -195,6 +223,7 @@ export async function authenticateWithBiometrics(): Promise<{
 export async function universalBiometricUnlock(): Promise<{
   success: boolean;
   cancelled?: boolean;
+  notAllowed?: boolean;
   error?: string;
 }> {
   if (isBiometricsConfigured()) {
@@ -204,6 +233,11 @@ export async function universalBiometricUnlock(): Promise<{
     if (reg.success) {
       return { success: true };
     }
-    return { success: false, error: reg.error };
+    return {
+      success: false,
+      cancelled: reg.cancelled,
+      notAllowed: reg.notAllowed,
+      error: reg.error,
+    };
   }
 }

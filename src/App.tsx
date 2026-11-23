@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { RoutineProvider, useRoutines } from './context/RoutineContext';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
@@ -24,9 +24,13 @@ const MainContent: React.FC<{
   const [taskToEdit, setTaskToEdit] = useState<TaskTemplate | null>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
+  const handleUnlock = useCallback(() => {
+    setIsLocked(false);
+  }, []);
+
   // If locked, render PIN screen exclusively
   if (isLocked) {
-    return <PinLock onUnlock={() => setIsLocked(false)} />;
+    return <PinLock onUnlock={handleUnlock} />;
   }
 
   const handleOpenNewTask = () => {

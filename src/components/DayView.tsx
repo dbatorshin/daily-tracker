@@ -154,205 +154,297 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
     position: 'before' | 'after';
   } | null>(null);
 
-  const pointerStateRef = useRef<{
-    pointerId: number;
-    taskId: string;
-    startX: number;
-    startY: number;
-    isDragging: boolean;
-    timer: ReturnType<typeof setTimeout> | null;
-    targetEl: HTMLElement | null;
-  } | null>(null);
-
+  const isDraggingRef = useRef(false);
   const wasDraggingRef = useRef(false);
+  const draggingTaskIdRef = useRef<string | null>(null);
+  const dropTargetRef = useRef<{ taskId: string; position: 'before' | 'after' } | null>(null);
+  const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number } | null>(null);
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>, taskId: string) => {
-    if (e.button !== 0) return;
+  useEffect(() => {
+    isDraggingRef.current = Boolean(draggingTaskId);
+    draggingTaskIdRef.current = draggingTaskId;
+  }, [draggingTaskId]);
+
+  useEffect(() => {
+    dropTargetRef.current = dropTarget;
+  }, [dropTarget]);
+
+  // Mobile Touch handlers: window-level non-passive touchmove prevents native scrolling once drag starts!
+  useEffect(() => {
+    const onWindowTouchMove = (e: TouchEvent) => {
+      const touch = e.touches[0];
+      if (!touch) return;
+
+      // If timer is still running and finger moved > 8px, cancel long-press (user is scrolling)
+      if (touchTimerRef.current && touchStartPosRef.current && !isDraggingRef.current) {
+        const dist = Math.hypot(
+          touch.clientX - touchStartPosRef.current.x,
+          touch.clientY - touchStartPosRef.current.y
+        );
+        if (dist > 8) {
+          clearTimeout(touchTimerRef.current);
+          touchTimerRef.current = null;
+        }
+      }
+
+      if (!isDraggingRef.current || !draggingTaskIdRef.current) return;
+
+      // CRITICAL: Cancels native page scrolling so touch stays active!
+      e.preventDefault();
+
+      const clientX = touch.clientX;
+      const clientY = touch.clientY;
+
+      // Auto-scroll near top/bottom of screen
+      if (clientY < 80) {
+        window.scrollBy({ top: -7, behavior: 'instant' });
+      } else if (clientY > window.innerHeight - 80) {
+        window.scrollBy({ top: 7, behavior: 'instant' });
+      }
+
+      // Find card under touch coordinates
+      const elements = document.elementsFromPoint(clientX, clientY);
+      let targetCardEl: HTMLElement | null = null;
+      for (const el of elements) {
+        const card = el.closest<HTMLElement>('[data-task-id]');
+        if (card && card.getAttribute('data-task-id') !== draggingTaskIdRef.current) {
+          targetCardEl = card;
+          break;
+        }
+      }
+
+      if (targetCardEl) {
+        const targetId = targetCardEl.getAttribute('data-task-id');
+        if (targetId) {
+          const rect = targetCardEl.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          const position: 'before' | 'after' = clientY < midY ? 'before' : 'after';
+
+          setDropTarget((prev) => {
+            if (prev?.taskId === targetId && prev?.position === position) return prev;
+            haptic.light();
+            return { taskId: targetId, position };
+          });
+          return;
+        }
+      }
+
+      // Check if dragging above first or below last card
+      const listEl = document.querySelector('[data-task-list]');
+      if (listEl) {
+        const listRect = listEl.getBoundingClientRect();
+        if (clientY < listRect.top && activeTasks.length > 0) {
+          const first = activeTasks[0];
+          if (first.id !== draggingTaskIdRef.current) {
+            setDropTarget((prev) => {
+              if (prev?.taskId === first.id && prev?.position === 'before') return prev;
+              return { taskId: first.id, position: 'before' };
+            });
+          }
+        } else if (clientY > listRect.bottom && activeTasks.length > 0) {
+          const last = activeTasks[activeTasks.length - 1];
+          if (last.id !== draggingTaskIdRef.current) {
+            setDropTarget((prev) => {
+              if (prev?.taskId === last.id && prev?.position === 'after') return prev;
+              return { taskId: last.id, position: 'after' };
+            });
+          }
+        }
+      }
+    };
+
+    const onWindowTouchEnd = () => {
+      if (touchTimerRef.current) {
+        clearTimeout(touchTimerRef.current);
+        touchTimerRef.current = null;
+      }
+
+      if (isDraggingRef.current && dropTargetRef.current && draggingTaskIdRef.current) {
+        const draggingId = draggingTaskIdRef.current;
+        const target = dropTargetRef.current;
+
+        const fromIdx = activeTasks.findIndex((t) => t.id === draggingId);
+        const toTaskIdx = activeTasks.findIndex((t) => t.id === target.taskId);
+
+        if (fromIdx !== -1 && toTaskIdx !== -1) {
+          let targetIdx = toTaskIdx;
+          if (target.position === 'after') {
+            targetIdx += 1;
+          }
+          if (fromIdx < targetIdx) {
+            targetIdx -= 1;
+          }
+
+          if (fromIdx !== targetIdx) {
+            const newOrdered = [...activeTasks];
+            const [moved] = newOrdered.splice(fromIdx, 1);
+            newOrdered.splice(targetIdx, 0, moved);
+
+            reorderTasks(newOrdered);
+            haptic.success();
+          }
+        }
+      }
+
+      const wasDragging = isDraggingRef.current;
+      isDraggingRef.current = false;
+      draggingTaskIdRef.current = null;
+      dropTargetRef.current = null;
+      setDraggingTaskId(null);
+      setDropTarget(null);
+
+      if (wasDragging) {
+        setTimeout(() => {
+          wasDraggingRef.current = false;
+        }, 120);
+      } else {
+        wasDraggingRef.current = false;
+      }
+    };
+
+    window.addEventListener('touchmove', onWindowTouchMove, { passive: false });
+    window.addEventListener('touchend', onWindowTouchEnd);
+    window.addEventListener('touchcancel', onWindowTouchEnd);
+
+    return () => {
+      window.removeEventListener('touchmove', onWindowTouchMove);
+      window.removeEventListener('touchend', onWindowTouchEnd);
+      window.removeEventListener('touchcancel', onWindowTouchEnd);
+    };
+  }, [activeTasks, reorderTasks]);
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>, taskId: string) => {
     if (activeTasks.length <= 1) return;
-
-    // Do not initiate drag if tapping on a button (e.g. "Выполнить")
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('[role="button"]') || target.closest('input')) {
       return;
     }
 
-    const currentTarget = e.currentTarget;
+    const touch = e.touches[0];
+    touchStartPosRef.current = { x: touch.clientX, y: touch.clientY };
 
-    const timer = setTimeout(() => {
-      const state = pointerStateRef.current;
-      if (state && state.taskId === taskId) {
-        state.isDragging = true;
-        wasDraggingRef.current = true;
-        try {
-          currentTarget.setPointerCapture(state.pointerId);
-        } catch {}
-        setDraggingTaskId(taskId);
-        haptic.medium();
-      }
+    if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+
+    touchTimerRef.current = setTimeout(() => {
+      isDraggingRef.current = true;
+      wasDraggingRef.current = true;
+      draggingTaskIdRef.current = taskId;
+      setDraggingTaskId(taskId);
+      haptic.medium();
+    }, 220);
+  };
+
+  // Desktop Mouse drag support
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>, taskId: string) => {
+    if (e.button !== 0) return;
+    if (activeTasks.length <= 1) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('[role="button"]') || target.closest('input')) {
+      return;
+    }
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+
+    if (touchTimerRef.current) clearTimeout(touchTimerRef.current);
+
+    touchTimerRef.current = setTimeout(() => {
+      isDraggingRef.current = true;
+      wasDraggingRef.current = true;
+      draggingTaskIdRef.current = taskId;
+      setDraggingTaskId(taskId);
+      haptic.medium();
     }, 200);
 
-    pointerStateRef.current = {
-      pointerId: e.pointerId,
-      taskId,
-      startX: e.clientX,
-      startY: e.clientY,
-      isDragging: false,
-      timer,
-      targetEl: currentTarget,
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const dist = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+      if (dist > 8 && !isDraggingRef.current) {
+        if (touchTimerRef.current) {
+          clearTimeout(touchTimerRef.current);
+          touchTimerRef.current = null;
+        }
+      }
+      if (!isDraggingRef.current) return;
+
+      moveEvent.preventDefault();
+
+      const elements = document.elementsFromPoint(moveEvent.clientX, moveEvent.clientY);
+      let targetCardEl: HTMLElement | null = null;
+      for (const el of elements) {
+        const card = el.closest<HTMLElement>('[data-task-id]');
+        if (card && card.getAttribute('data-task-id') !== draggingTaskIdRef.current) {
+          targetCardEl = card;
+          break;
+        }
+      }
+
+      if (targetCardEl) {
+        const targetId = targetCardEl.getAttribute('data-task-id');
+        if (targetId) {
+          const rect = targetCardEl.getBoundingClientRect();
+          const midY = rect.top + rect.height / 2;
+          const position: 'before' | 'after' = moveEvent.clientY < midY ? 'before' : 'after';
+
+          setDropTarget((prev) => {
+            if (prev?.taskId === targetId && prev?.position === position) return prev;
+            haptic.light();
+            return { taskId: targetId, position };
+          });
+        }
+      }
     };
-  };
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    const state = pointerStateRef.current;
-    if (!state || state.pointerId !== e.pointerId) return;
-
-    if (!state.isDragging) {
-      const dist = Math.hypot(e.clientX - state.startX, e.clientY - state.startY);
-      // If moved more than 8px before timer fired, it's a scroll gesture -> cancel long-press
-      if (dist > 8) {
-        if (state.timer) {
-          clearTimeout(state.timer);
-          state.timer = null;
-        }
-        pointerStateRef.current = null;
+    const onMouseUp = () => {
+      if (touchTimerRef.current) {
+        clearTimeout(touchTimerRef.current);
+        touchTimerRef.current = null;
       }
-      return;
-    }
 
-    // Auto-scroll when near top or bottom of viewport
-    if (e.clientY < 80) {
-      window.scrollBy({ top: -7, behavior: 'instant' });
-    } else if (e.clientY > window.innerHeight - 80) {
-      window.scrollBy({ top: 7, behavior: 'instant' });
-    }
+      if (isDraggingRef.current && dropTargetRef.current && draggingTaskIdRef.current) {
+        const draggingId = draggingTaskIdRef.current;
+        const target = dropTargetRef.current;
 
-    // Find card under pointer
-    const elements = document.elementsFromPoint(e.clientX, e.clientY);
-    let targetCardEl: HTMLElement | null = null;
-    for (const el of elements) {
-      const card = el.closest<HTMLElement>('[data-task-id]');
-      if (card && card.getAttribute('data-task-id') !== state.taskId) {
-        targetCardEl = card;
-        break;
-      }
-    }
+        const fromIdx = activeTasks.findIndex((t) => t.id === draggingId);
+        const toTaskIdx = activeTasks.findIndex((t) => t.id === target.taskId);
 
-    if (targetCardEl) {
-      const targetId = targetCardEl.getAttribute('data-task-id');
-      if (targetId) {
-        const rect = targetCardEl.getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        const position: 'before' | 'after' = e.clientY < midY ? 'before' : 'after';
+        if (fromIdx !== -1 && toTaskIdx !== -1) {
+          let targetIdx = toTaskIdx;
+          if (target.position === 'after') targetIdx += 1;
+          if (fromIdx < targetIdx) targetIdx -= 1;
 
-        setDropTarget((prev) => {
-          if (prev?.taskId === targetId && prev?.position === position) return prev;
-          haptic.light();
-          return { taskId: targetId, position };
-        });
-        return;
-      }
-    }
+          if (fromIdx !== targetIdx) {
+            const newOrdered = [...activeTasks];
+            const [moved] = newOrdered.splice(fromIdx, 1);
+            newOrdered.splice(targetIdx, 0, moved);
 
-    // Check if dragging above the first or below the last card
-    const listEl = document.querySelector('[data-task-list]');
-    if (listEl) {
-      const listRect = listEl.getBoundingClientRect();
-      if (e.clientY < listRect.top && activeTasks.length > 0) {
-        const first = activeTasks[0];
-        if (first.id !== state.taskId) {
-          setDropTarget((prev) => {
-            if (prev?.taskId === first.id && prev?.position === 'before') return prev;
-            return { taskId: first.id, position: 'before' };
-          });
-          return;
-        }
-      } else if (e.clientY > listRect.bottom && activeTasks.length > 0) {
-        const last = activeTasks[activeTasks.length - 1];
-        if (last.id !== state.taskId) {
-          setDropTarget((prev) => {
-            if (prev?.taskId === last.id && prev?.position === 'after') return prev;
-            return { taskId: last.id, position: 'after' };
-          });
-          return;
+            reorderTasks(newOrdered);
+            haptic.success();
+          }
         }
       }
-    }
-  };
 
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    const state = pointerStateRef.current;
-    if (state?.timer) {
-      clearTimeout(state.timer);
-      state.timer = null;
-    }
+      const wasDragging = isDraggingRef.current;
+      isDraggingRef.current = false;
+      draggingTaskIdRef.current = null;
+      dropTargetRef.current = null;
+      setDraggingTaskId(null);
+      setDropTarget(null);
 
-    if (!state || state.pointerId !== e.pointerId) {
-      pointerStateRef.current = null;
-      return;
-    }
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
 
-    try {
-      if (state.targetEl) {
-        state.targetEl.releasePointerCapture(e.pointerId);
-      }
-    } catch {}
-
-    const wasDragging = state.isDragging;
-
-    if (wasDragging && dropTarget) {
-      const fromIdx = activeTasks.findIndex((t) => t.id === state.taskId);
-      const toTaskIdx = activeTasks.findIndex((t) => t.id === dropTarget.taskId);
-
-      if (fromIdx !== -1 && toTaskIdx !== -1) {
-        let targetIdx = toTaskIdx;
-        if (dropTarget.position === 'after') {
-          targetIdx += 1;
-        }
-        if (fromIdx < targetIdx) {
-          targetIdx -= 1;
-        }
-
-        if (fromIdx !== targetIdx) {
-          const newOrdered = [...activeTasks];
-          const [moved] = newOrdered.splice(fromIdx, 1);
-          newOrdered.splice(targetIdx, 0, moved);
-
-          reorderTasks(newOrdered);
-          haptic.success();
-        }
-      }
-    }
-
-    pointerStateRef.current = null;
-    setDraggingTaskId(null);
-    setDropTarget(null);
-
-    if (wasDragging) {
-      setTimeout(() => {
+      if (wasDragging) {
+        setTimeout(() => {
+          wasDraggingRef.current = false;
+        }, 120);
+      } else {
         wasDraggingRef.current = false;
-      }, 80);
-    } else {
-      wasDraggingRef.current = false;
-    }
-  };
-
-  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
-    const state = pointerStateRef.current;
-    if (state?.timer) {
-      clearTimeout(state.timer);
-      state.timer = null;
-    }
-    try {
-      if (state?.targetEl) {
-        state.targetEl.releasePointerCapture(e.pointerId);
       }
-    } catch {}
-    pointerStateRef.current = null;
-    setDraggingTaskId(null);
-    setDropTarget(null);
-    setTimeout(() => {
-      wasDraggingRef.current = false;
-    }, 80);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   };
 
   const handleClickCard = (task: TaskTemplate) => {
@@ -545,10 +637,8 @@ export const DayView: React.FC<DayViewProps> = ({ onEditTask, onAddNewTask }) =>
 
                   <div className="task-row-content w-full min-w-0">
                     <div
-                      onPointerDown={(e) => handlePointerDown(e, task.id)}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={handlePointerUp}
-                      onPointerCancel={handlePointerCancel}
+                      onTouchStart={(e) => handleTouchStart(e, task.id)}
+                      onMouseDown={(e) => handleMouseDown(e, task.id)}
                       onClick={() => handleClickCard(task)}
                       className={`${cardClass} w-full min-w-0 flex items-center justify-between gap-2.5 sm:gap-3.5 cursor-pointer active:scale-[0.99] select-none transition-all ${
                         isDragging ? 'is-active-dragging' : ''

@@ -187,3 +187,23 @@ export async function authenticateWithBiometrics(): Promise<{
     return { success: false, error: err?.message || 'Не удалось выполнить биометрический вход.' };
   }
 }
+
+/**
+ * Universal biometric unlock: authenticates if credentials exist,
+ * or registers and verifies on first use in a single seamless flow.
+ */
+export async function universalBiometricUnlock(): Promise<{
+  success: boolean;
+  cancelled?: boolean;
+  error?: string;
+}> {
+  if (isBiometricsConfigured()) {
+    return await authenticateWithBiometrics();
+  } else {
+    const reg = await registerBiometrics();
+    if (reg.success) {
+      return { success: true };
+    }
+    return { success: false, error: reg.error };
+  }
+}

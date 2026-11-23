@@ -109,7 +109,7 @@ export async function registerBiometrics(): Promise<{
       },
       user: {
         id: Uint8Array.from('daily_routines_user_key', (c) => c.charCodeAt(0)),
-        name: 'user@daily.local',
+        name: 'Ежедневки',
         displayName: 'Ежедневки',
       },
       pubKeyCredParams: [
